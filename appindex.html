@@ -1,0 +1,673 @@
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apoyo al Bienestar Emocional</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for data visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- jsPDF and html2canvas for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        /* Custom styles to ensure proper page breaks in PDF */
+        @media print {
+            .page-break {
+                page-break-after: always;
+            }
+        }
+        body {
+            font-family: 'sans-serif';
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <div id="app" class="min-h-screen flex items-center justify-center p-4">
+        <!-- The application content will be rendered here by JavaScript -->
+    </div>
+
+    <script type="module">
+        // Firebase imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, collection, addDoc, onSnapshot, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Main application container
+        const appContainer = document.getElementById('app');
+
+        // --- STATE MANAGEMENT ---
+        // We use simple variables to manage the application's state, similar to React's state.
+        let currentScreen = 'intro';
+        let answers = {};
+        let selectedTopic = null;
+        let grade = '';
+        let group = '';
+        let password = '';
+        let loginError = '';
+        let isDownloading = false;
+        let surveyData = [];
+        let chartInstances = {}; // To store chart objects for later destruction
+
+        // Firebase instances
+        let db, auth, userId;
+        let isAuthReady = false;
+
+        // --- DATA (Questionnaires) ---
+        // This object holds all the questions, descriptions, and results messages.
+        const allQuestionnaires = {
+            'ansiedad-depresion': {
+              title: 'Ansiedad y Depresión',
+              description: 'Reflexiona sobre tus sentimientos de tristeza, nerviosismo y preocupación para entenderte mejor.',
+              questions: [
+                { id: 'ad1', text: '¿Con qué frecuencia te has sentido triste o desmotivado/a?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ad2', text: '¿Con qué frecuencia has perdido el interés en actividades que antes disfrutabas?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ad3', text: '¿Con qué frecuencia te has sentido ansioso/a o con nervios?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ad4', text: '¿Con qué frecuencia has tenido problemas para dormir o conciliar el sueño?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ad5', text: '¿Has notado cambios en tu apetito o en tu peso sin razón aparente?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ad6', text: '¿Con qué frecuencia te sientes tan irritable que te enojas fácilmente con los demás?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ad7', text: '¿Te sientes con frecuencia cansado/a o sin energía, incluso después de haber descansado?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'Es normal tener días difíciles, pero si te sientes triste o sin energía a menudo, es importante que sepas que hablar con alguien puede ayudarte a sentirte mejor.',
+            },
+            'consumo-sustancias': {
+              title: 'Consumo de Sustancias',
+              description: 'Un espacio para reflexionar sobre el uso de sustancias y su impacto en tu vida y tus emociones.',
+              questions: [
+                { id: 's1', text: '¿Sientes que el consumo de alguna sustancia te ayuda a afrontar tus problemas o emociones?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 's2', text: '¿Con qué frecuencia has usado sustancias cuando estás solo/a?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 's3', text: '¿Alguna vez te has sentido presionado/a para consumir alguna sustancia?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 's4', text: '¿Has notado que necesitas usar más cantidad de una sustancia para sentir el mismo efecto?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 's5', text: '¿Te has encontrado en situaciones de riesgo por consumir una sustancia?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'El consumo de sustancias puede ser una forma de lidiar con el estrés, pero hay otras maneras más sanas de hacerlo. Te animamos a hablar con un profesional sobre tus preocupaciones.',
+            },
+            'comportamiento-riesgo': {
+              title: 'Comportamiento de Riesgo',
+              description: 'Reflexiona sobre las conductas y cambios de ánimo que podrían estar afectando tu bienestar.',
+              questions: [
+                { id: 'cr1', text: '¿Con qué frecuencia has notado cambios bruscos en tu estado de ánimo (irritabilidad, agitación, etc.)?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cr2', text: '¿Sientes que te has aislado socialmente de tus amigos o familiares?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cr3', text: '¿Has sentido una falta de interés o desmotivación en actividades que solías disfrutar?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cr4', text: '¿Con qué frecuencia te cuesta trabajo controlar tu frustración?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cr5', text: '¿Has notado que tus hábitos de sueño han cambiado de forma drástica (dormir mucho o muy poco)?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cr6', text: '¿Te has encontrado en situaciones de peligro por buscar emociones fuertes o riesgos?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cr7', text: '¿Te ha resultado difícil seguir las reglas en la escuela o en casa?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'Identificar estos cambios es el primer paso para sentirte mejor. Es valiente reconocerlo. Nuestro equipo de orientación está aquí para escucharte y darte herramientas para manejar estas emociones.',
+            },
+            'comportamiento-violento': {
+              title: 'Comportamiento Violento',
+              description: 'Si tienes problemas para manejar la ira o te agreden, este espacio es para ti.',
+              questions: [
+                { id: 'cv1', text: '¿Con qué frecuencia tienes arranques de enojo o te enojas con facilidad?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cv2', text: '¿Alguna vez has agredido a otro estudiante verbal o físicamente?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cv3', text: '¿Te sientes acosado/a o agredido/a por otros estudiantes?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cv4', text: '¿Te has encontrado en peleas o discusiones que se vuelven físicas?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cv5', text: '¿Te cuesta trabajo controlar lo que dices cuando estás enojado/a?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cv6', text: '¿Te sientes a menudo intimidado/a o amenazado/a por otras personas?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'cv7', text: '¿Has dañado la propiedad de otras personas cuando estás enojado/a?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'Manejar la ira y resolver conflictos es algo que se puede aprender. Hablar de ello es un gran acto de valentía. Estamos aquí para ayudarte a encontrar formas seguras de expresarte y resolver problemas.',
+            },
+            'entorno-familiar': {
+              title: 'Entorno Familiar y Bienestar',
+              description: 'Reflexiona sobre tu vida en casa y cómo podría afectar tus emociones y comportamiento en la escuela.',
+              questions: [
+                { id: 'ef1', text: '¿Con qué frecuencia las discusiones en tu casa afectan tu estado de ánimo?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ef2', text: '¿Has sentido que la falta de atención o la ausencia de algún familiar te hace sentir solo/a?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ef3', text: '¿Has notado que los problemas de un familiar te causan estrés o preocupación?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ef4', text: '¿Te sientes a menudo inseguro/a en casa debido a la tensión o el miedo?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ef5', text: '¿Sientes que no puedes hablar de tus problemas en casa por miedo o falta de confianza?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ef6', text: '¿Con qué frecuencia sientes que los conflictos familiares afectan tu rendimiento escolar?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ef7', text: '¿Has sentido que eres responsable de los problemas o el enojo en tu familia?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'Tu entorno familiar es muy importante para tu bienestar. Hablar sobre lo que sucede en casa es un paso importante para encontrar apoyo. Te animamos a contactar al área de orientación para un espacio seguro donde puedas hablar libremente.',
+            },
+            'autoestima': {
+              title: 'Autoestima y Sentimientos de Duda',
+              description: 'Piensa en cómo te sientes contigo mismo/a, tus habilidades y tu valor personal.',
+              questions: [
+                { id: 'au1', text: '¿Con qué frecuencia te sientes inseguro/a sobre tus habilidades o tu apariencia?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'au2', text: '¿Con qué frecuencia te comparas con otros estudiantes y te sientes inferior?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'au3', text: '¿Con qué frecuencia te cuesta trabajo hablar en clase o con nuevos compañeros por timidez?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'au4', text: '¿Con qué frecuencia te sientes decepcionado/a de ti mismo/a por no cumplir con tus propias expectativas?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'au5', text: '¿Te ha resultado difícil aceptar cumplidos o reconocer tus logros?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'au6', text: '¿Sientes que no eres lo suficientemente bueno/a en la escuela o en tus actividades favoritas?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'au7', text: '¿Te evitas situaciones sociales por miedo a ser juzgado/a?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'Valorarte a ti mismo/a es el primer paso para sentirte más seguro/a. No tienes que hacerlo solo/a. El área de orientación está aquí para ayudarte a reconocer tu valor y a construir tu confianza.',
+            },
+            'aprendizaje': {
+              title: 'Desafíos en el Aprendizaje',
+              description: 'Reflexiona sobre las dificultades que podrías estar experimentando al estudiar o al concentrarte en la escuela.',
+              questions: [
+                { id: 'ap1', text: '¿Con qué frecuencia te sientes frustrado/a o abrumado/a con las tareas escolares?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ap2', text: '¿Con qué frecuencia tienes problemas para concentrarte en clase o al hacer la tarea?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ap3', text: '¿Has notado que te cuesta más aprender en ciertas materias, como matemáticas o lectura?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ap4', text: '¿Con qué frecuencia sientes que no puedes seguir el ritmo de tus compañeros en la escuela?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ap5', text: '¿Te ha resultado difícil entender las instrucciones del profesor, incluso cuando otros las entienden?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ap6', text: '¿Sientes que el desánimo por tus calificaciones afecta tu motivación para intentar de nuevo?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ap7', text: '¿Te sientes más estresado/a que tus amigos por la escuela o los exámenes?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'Tener dificultades en el aprendizaje es más común de lo que crees. Hablar con un profesional puede ayudarte a encontrar las estrategias correctas para estudiar y sentirte más seguro/a. Nuestro equipo está para apoyarte.',
+            },
+            'hiperactividad': {
+              title: 'Hiperactividad y Concentración',
+              description: 'Reflexiona sobre tu energía, dificultad para estar quieto y problemas para concentrarte en tus actividades.',
+              questions: [
+                { id: 'h1', text: '¿Con qué frecuencia sientes la necesidad de levantarte o moverte cuando se supone que debes estar sentado/a?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'h2', text: '¿Con qué frecuencia te cuesta trabajo esperar tu turno en juegos o conversaciones?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'h3', text: '¿Con qué frecuencia interrumpes a los demás mientras están hablando o haciendo una actividad?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'h4', text: '¿Con qué frecuencia sientes que tienes demasiada energía o que tu cuerpo se mueve sin que lo controles?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'h5', text: '¿Te cuesta trabajo concentrarte en un solo tema o actividad por más de unos minutos?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'h6', text: '¿Tiendes a cometer errores por falta de atención, incluso en tareas sencillas?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'h7', text: '¿Te resulta difícil organizar tus cosas, tareas o tu tiempo?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'Manejar la energía extra y la concentración puede ser un desafío, pero es algo que se puede aprender. Hablar de ello puede ayudarte a encontrar las mejores formas de manejarlo y a tener más éxito en la escuela.',
+            },
+            'bullying': {
+              title: 'Bullying y Acoso Escolar',
+              description: 'Un espacio para reflexionar sobre situaciones de acoso y cómo afectan a tu bienestar emocional.',
+              questions: [
+                { id: 'b1', text: '¿Con qué frecuencia has sido víctima de burlas, insultos o comentarios negativos?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'b2', text: '¿Has sentido miedo de ir a la escuela por el comportamiento de otros estudiantes?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'b3', text: '¿Has visto a otros estudiantes siendo acosados y no has sabido qué hacer?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'b4', text: '¿Has participado en situaciones de acoso o has molestado a otros estudiantes?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'b5', text: '¿Te han excluido de forma intencional de grupos o actividades?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'b6', text: '¿Has presenciado a otros estudiantes siendo víctimas de acoso cibernético (ciberbullying)?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'b7', text: '¿Te sientes incapaz de defenderte o de pedir ayuda en situaciones de acoso?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'El acoso escolar es un problema serio, y es muy valiente hablar de ello. Ya seas víctima, testigo o si has participado en el acoso, hay ayuda disponible. Contacta al área de orientación para un espacio confidencial donde te podemos apoyar.',
+            },
+            'transtornos-alimentarios': {
+              title: 'Trastornos Alimentarios',
+              description: 'Reflexiona sobre tu relación con la comida y cómo te sientes con tu cuerpo. Es un espacio seguro.',
+              questions: [
+                { id: 'ta1', text: '¿Con qué frecuencia te saltas comidas o comes muy poco intencionalmente?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ta2', text: '¿Te has sentido culpable o avergonzado/a después de comer?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ta3', text: '¿Con qué frecuencia te obsesionas con tu peso o la forma de tu cuerpo?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ta4', text: '¿Has notado que comes grandes cantidades de comida en secreto o cuando estás solo/a?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ta5', text: '¿Te sientes ansioso/a si no sabes qué vas a comer o si no puedes controlar tus alimentos?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ta6', text: '¿Has sentido que tu estado de ánimo depende de cómo te sientes con tu cuerpo?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'ta7', text: '¿Te has provocado el vómito o has usado laxantes para controlar tu peso?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'La relación con la comida y tu cuerpo es un tema muy personal, pero no tienes que enfrentarlo solo/a. El primer paso para sanar es hablar. Estamos aquí para ayudarte a encontrar el camino a una relación más sana con tu cuerpo.',
+            },
+            'violencia-familiar': {
+              title: 'Violencia Familiar',
+              description: 'Reflexiona si has experimentado violencia o tensión en tu hogar y cómo te ha afectado.',
+              questions: [
+                { id: 'vf1', text: '¿Con qué frecuencia has presenciado discusiones violentas o peleas en tu hogar?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'vf2', text: '¿Has sentido que corres peligro o te has sentido agredido/a física o verbalmente en tu casa?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'vf3', text: '¿La tensión en tu hogar te impide concentrarte o te causa estrés en la escuela?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'vf4', text: '¿Te sientes aterrorizado/a o con miedo cuando un miembro de tu familia está enojado?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'vf5', text: '¿Te han amenazado con hacerte daño a ti o a alguien que quieres?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'vf6', text: '¿Sientes que debes ocultar lo que pasa en tu hogar para no avergonzar a tu familia?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'vf7', text: '¿Con qué frecuencia sientes que debes proteger a un familiar de otro?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'Ninguna forma de violencia es aceptable. Queremos que sepas que estás a salvo con nosotros. Habla con un consejero de orientación de inmediato. Estamos aquí para protegerte y para ayudarte.',
+            },
+            'violacion-abuso': {
+              title: 'Violación y Abuso Sexual',
+              description: 'Este es un espacio confidencial y seguro para buscar ayuda si has sido víctima de abuso sexual.',
+              questions: [
+                { id: 'va1', text: '¿Alguna persona te ha tocado de forma inapropiada sin tu permiso?', options: [{ value: 1, label: 'No' }, { value: 2, label: 'Sí' }] },
+                { id: 'va2', text: '¿Alguien te ha obligado o manipulado para hacer cosas que no querías hacer?', options: [{ value: 1, label: 'No' }, { value: 2, label: 'Sí' }] },
+                { id: 'va3', text: '¿Alguien te ha amenazado o te ha hecho sentir incómodo/a para obtener algún favor sexual?', options: [{ value: 1, label: 'No' }, { value: 2, label: 'Sí' }] },
+                { id: 'va4', text: '¿Has sido forzado/a a participar en algún acto sexual?', options: [{ value: 1, label: 'No' }, { value: 2, label: 'Sí' }] },
+                { id: 'va5', text: '¿Te han tomado o enviado fotos inapropiadas de ti sin tu consentimiento?', options: [{ value: 1, label: 'No' }, { value: 2, label: 'Sí' }] },
+              ],
+              resultMessage: 'Entendemos que esto es muy difícil de abordar. Queremos que sepas que lo que te pasó no fue tu culpa. Es muy importante que hables de esto con alguien de confianza. Estamos aquí para ayudarte de forma confidencial y segura. Contacta al área de orientación de la escuela para que podamos ayudarte de inmediato.',
+            },
+            'autolesion': {
+              title: 'Autolesiones',
+              description: 'Este es un espacio para reflexionar sobre tus sentimientos de dolor y la necesidad de dañarte a ti mismo/a.',
+              questions: [
+                { id: 'al1', text: '¿Alguna vez has pensado en lastimarte para liberar la presión o el dolor emocional?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'al2', text: '¿Con qué frecuencia te has hecho daño físico a ti mismo/a de forma intencional?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'al3', text: '¿Has usado la autolesión para castigarte por algo que hiciste o dijiste?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'al4', text: '¿Has pensado en maneras de hacerte daño a ti mismo/a?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'al5', text: '¿Te ha resultado difícil detenerte cuando empiezas a lastimarte?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'Si estás pensando en lastimarte, es una señal de que estás sufriendo mucho. Por favor, no lo hagas. Estamos aquí para ayudarte de inmediato. Contacta con el área de orientación de la escuela para que podamos ayudarte.',
+            },
+            'suicidio': {
+              title: 'Pensamientos Suicidas',
+              description: 'Un espacio seguro para explorar tus sentimientos de desesperanza o si has tenido pensamientos sobre terminar con tu vida.',
+              questions: [
+                { id: 'sui1', text: '¿Con qué frecuencia has sentido una desesperanza tan profunda que no le encuentras sentido a la vida?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'sui2', text: '¿Has pensado en cómo o cuándo podrías terminar con tu vida?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'sui3', text: '¿Has considerado o planeado quitarte la vida?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'sui4', text: '¿Te sientes como si no hubiera nadie a quien puedas recurrir para pedir ayuda?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+                { id: 'sui5', text: '¿Te has alejado de tus amigos y familiares y te sientes solo/a con tus problemas?', options: [{ value: 1, label: 'Casi nunca' }, { value: 2, label: 'A veces' }, { value: 3, label: 'A menudo' }, { value: 4, label: 'Muy a menudo' }] },
+              ],
+              resultMessage: 'Si has tenido estos pensamientos, es una señal de que necesitas ayuda de inmediato. Tu vida es increíblemente valiosa y hay personas que quieren ayudarte a superar este dolor. Por favor, habla con alguien de confianza ahora mismo. Llama al 911 o contacta al área de orientación de la escuela. No estás solo/a.',
+            },
+        };
+
+        // --- FIREBASE INITIALIZATION ---
+        const initializeFirebase = () => {
+             try {
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('debug');
+                authenticateUser();
+            } catch (e) {
+                console.error("Firebase initialization failed:", e);
+                isAuthReady = true;
+                render(); // Render even if firebase fails
+            }
+        };
+
+        const authenticateUser = async () => {
+            const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Authentication failed, trying anonymous sign-in:", error);
+                try {
+                    await signInAnonymously(auth);
+                } catch (anonError) {
+                    console.error("Anonymous sign-in failed:", anonError);
+                }
+            } finally {
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("User authenticated with UID:", userId);
+                        isAuthReady = true;
+                        listenToSurveyData();
+                        render();
+                    }
+                });
+            }
+        };
+        
+        const listenToSurveyData = () => {
+            if (!isAuthReady || !db) return;
+            try {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const collectionRef = collection(db, `artifacts/${appId}/public/data/survey_results`);
+                
+                onSnapshot(collectionRef, (snapshot) => {
+                    surveyData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // If the dashboard is visible, re-render it to update charts
+                    if (currentScreen === 'dashboard') {
+                        render();
+                    }
+                }, (error) => {
+                    console.error("Error fetching survey data:", error);
+                });
+            } catch (e) {
+                console.error("Firestore setup failed:", e);
+            }
+        };
+
+        // --- LOGIC FUNCTIONS ---
+        const saveResults = async () => {
+            if (!db || !userId) {
+                console.error("Firebase is not initialized or user is not authenticated.");
+                return;
+            }
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const collectionRef = collection(db, `artifacts/${appId}/public/data/survey_results`);
+            try {
+                await addDoc(collectionRef, {
+                    userId: userId,
+                    topic: selectedTopic,
+                    answers: answers,
+                    grade: grade,
+                    group: group,
+                    timestamp: serverTimestamp()
+                });
+                console.log("Results saved successfully.");
+            } catch (e) {
+                console.error("Error adding document: ", e);
+            }
+        };
+
+        const processChartData = (topic) => {
+            const topicData = surveyData.filter(d => d.topic === topic);
+            const grades = [...new Set(topicData.map(d => d.grade))].sort();
+            
+            const dataByGrade = grades.reduce((acc, currentGrade) => {
+                acc[currentGrade] = topicData.filter(d => d.grade === currentGrade);
+                return acc;
+            }, {});
+            
+            const chartData = Object.keys(dataByGrade).map(currentGrade => {
+                const gradeResults = dataByGrade[currentGrade];
+                const totalScore = gradeResults.reduce((sum, result) => {
+                    const score = (result.answers && typeof result.answers === 'object') 
+                        ? Object.values(result.answers).reduce((s, val) => s + (Number(val) || 0), 0)
+                        : 0;
+                    return sum + score;
+                }, 0);
+                const averageScore = gradeResults.length > 0 ? totalScore / gradeResults.length : 0;
+                return {
+                    grade: `Grado ${currentGrade}`,
+                    score: parseFloat(averageScore.toFixed(2)),
+                };
+            });
+            
+            return {
+                labels: chartData.map(d => d.grade),
+                datasets: [{
+                    label: 'Puntuación Promedio',
+                    data: chartData.map(d => d.score),
+                    backgroundColor: 'rgba(136, 132, 216, 0.5)',
+                    borderColor: 'rgba(136, 132, 216, 1)',
+                    borderWidth: 1
+                }]
+            };
+        };
+
+        const downloadPDF = async () => {
+            if (!window.jspdf || !window.html2canvas) {
+                console.error("PDF generation libraries not loaded yet.");
+                return;
+            }
+            isDownloading = true;
+            render(); // Re-render to show loading state on button
+
+            try {
+                const { jsPDF } = window.jspdf;
+                const input = document.getElementById('dashboard-content');
+                
+                const canvas = await window.html2canvas(input, { scale: 2, useCORS: true });
+                const imgData = canvas.toDataURL('image/png');
+                
+                const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const imgHeight = canvas.height * pdfWidth / canvas.width;
+                let heightLeft = imgHeight;
+                let position = 0;
+
+                pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
+                heightLeft -= pdf.internal.pageSize.getHeight();
+
+                while (heightLeft > 0) {
+                    position = heightLeft - imgHeight;
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
+                    heightLeft -= pdf.internal.pageSize.getHeight();
+                }
+                
+                pdf.save('analisis-resultados.pdf');
+            } catch (error) {
+                console.error("Error generating PDF:", error);
+            } finally {
+                isDownloading = false;
+                render(); // Re-render to restore button state
+            }
+        };
+
+        // --- RENDERER ---
+        // The main function to render the UI based on the current state.
+        const render = () => {
+            switch (currentScreen) {
+                case 'intro':
+                    appContainer.innerHTML = `
+                        <div class="w-full max-w-4xl mx-auto">
+                            <div class="relative flex flex-col items-center text-center p-8 bg-white rounded-xl shadow-lg">
+                                <button id="login-button" class="absolute top-4 right-4 px-4 py-2 bg-gray-200 text-gray-800 font-semibold rounded-full shadow-md hover:bg-gray-300 transition-colors text-sm">ID</button>
+                                <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQm3c4L7j28S8XKDxnofIPg_8oJZi7TDObfKjJFrzewKK-KTCkjNP1MvRNCbzlfj5RSRMQ&usqp=CAU" alt="Bienestar Emocional" class="w-32 h-32 mb-4 rounded-full object-cover shadow-md"/>
+                                <div class="text-xs text-gray-600 mb-4">
+                                    <p>SUBSECRETARÍA DE EDUCACIÓN OBLIGATORIA</p>
+                                    <p>DIRECCIÓN GENERAL DE EDUCACIÓN BÁSICA</p>
+                                    <p>PRIMER NIVEL</p>
+                                    <p>DIRECCIÓN DE SECUNDARIAS GENERALES</p>
+                                    <p>SUPERVISIÓN DE ZONA 011 DE EDUCACIÓN SECUNDARIA GENERAL</p>
+                                    <p>ESC. SEC. GRAL. “CARMEN SERDAN”</p>
+                                    <p>C.C.T. 21DES0125K</p>
+                                </div>
+                                <h1 class="text-3xl sm:text-4xl font-bold mb-4 text-gray-800">Bienvenido/a</h1>
+                                <p class="text-lg mb-6 text-gray-600">Esta aplicación es para ayudarte a reflexionar sobre tus emociones y bienestar. Responde estas preguntas de forma sincera. Es un espacio seguro.</p>
+                                <p class="text-lg mb-8 text-gray-600">Tus respuestas son privadas y confidenciales. Al final, te mostraremos cómo contactar con el área de Orientación Psicológica de la escuela si lo necesitas.</p>
+                                <button id="start-button" class="w-full sm:w-auto px-6 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-md hover:bg-indigo-700 transition-colors">Comenzar</button>
+                            </div>
+                        </div>
+                    `;
+                    document.getElementById('start-button').addEventListener('click', () => { currentScreen = 'userInfo'; render(); });
+                    document.getElementById('login-button').addEventListener('click', () => { currentScreen = 'login'; render(); });
+                    break;
+                
+                case 'login':
+                    appContainer.innerHTML = `
+                        <div class="w-full max-w-lg mx-auto">
+                            <div class="flex flex-col items-center text-center p-8 bg-white rounded-xl shadow-lg">
+                                <h2 class="text-2xl font-bold mb-6 text-gray-800">Acceso para Personal</h2>
+                                <p class="text-lg mb-6 text-gray-600">Por favor, introduce la contraseña para ver el análisis de datos.</p>
+                                <div class="w-full max-w-xs mb-4">
+                                    <input id="password-input" type="password" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Contraseña" value="${password}">
+                                </div>
+                                ${loginError ? `<p class="text-red-500 text-sm mb-4">${loginError}</p>` : ''}
+                                <div class="flex flex-col sm:flex-row gap-4">
+                                    <button id="login-submit" class="w-full sm:w-auto px-6 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-md hover:bg-indigo-700 transition-colors">Acceder</button>
+                                    <button id="back-to-intro" class="w-full sm:w-auto px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-full shadow-md hover:bg-gray-300 transition-colors">Volver</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    const passwordInput = document.getElementById('password-input');
+                    passwordInput.addEventListener('input', (e) => password = e.target.value);
+                    document.getElementById('login-submit').addEventListener('click', () => {
+                        if (password === 'escuela2025') {
+                            currentScreen = 'dashboard';
+                            password = '';
+                            loginError = '';
+                            render();
+                        } else {
+                            loginError = 'Contraseña incorrecta. Inténtalo de nuevo.';
+                            render();
+                        }
+                    });
+                    document.getElementById('back-to-intro').addEventListener('click', () => { currentScreen = 'intro'; render(); });
+                    break;
+
+                case 'userInfo':
+                    appContainer.innerHTML = `
+                        <div class="w-full max-w-lg mx-auto">
+                            <div class="flex flex-col items-center text-center p-8 bg-white rounded-xl shadow-lg">
+                                <h2 class="text-2xl font-bold mb-6 text-gray-800">Datos del Estudiante</h2>
+                                <p class="text-lg mb-6 text-gray-600">Por favor, introduce tu grado y grupo. Esta información se utilizará de forma anónima para ayudar a la escuela a identificar tendencias y ofrecer un mejor apoyo.</p>
+                                <div class="w-full max-w-xs mb-4">
+                                    <label for="grade-input" class="block text-left text-sm font-medium text-gray-700">Grado:</label>
+                                    <select id="grade-input" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                        <option value="">Selecciona tu grado</option>
+                                        <option value="1" ${grade === '1' ? 'selected' : ''}>1ero</option>
+                                        <option value="2" ${grade === '2' ? 'selected' : ''}>2do</option>
+                                        <option value="3" ${grade === '3' ? 'selected' : ''}>3ero</option>
+                                    </select>
+                                </div>
+                                <div class="w-full max-w-xs mb-6">
+                                    <label for="group-input" class="block text-left text-sm font-medium text-gray-700">Grupo:</label>
+                                    <input id="group-input" type="text" value="${group}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Ej. A, B, C" maxlength="1">
+                                </div>
+                                <div class="flex flex-col sm:flex-row gap-4 mt-4">
+                                    <button id="back-to-intro-user" class="w-full sm:w-auto px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-full shadow-md hover:bg-gray-300 transition-colors">Volver a Inicio</button>
+                                    <button id="continue-to-topics" class="w-full sm:w-auto px-6 py-3 font-semibold rounded-full shadow-md transition-colors ${grade && group ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}" ${!grade || !group ? 'disabled' : ''}>Continuar</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    const gradeInput = document.getElementById('grade-input');
+                    const groupInput = document.getElementById('group-input');
+                    gradeInput.addEventListener('change', (e) => { grade = e.target.value; render(); });
+                    groupInput.addEventListener('input', (e) => { group = e.target.value.toUpperCase(); render(); });
+                    document.getElementById('back-to-intro-user').addEventListener('click', () => {
+                        currentScreen = 'intro'; grade = ''; group = ''; render();
+                    });
+                    document.getElementById('continue-to-topics').addEventListener('click', () => {
+                        if (grade && group) { currentScreen = 'topics'; render(); }
+                    });
+                    break;
+                
+                case 'topics':
+                    appContainer.innerHTML = `
+                        <div class="w-full max-w-4xl mx-auto p-4 bg-white rounded-xl shadow-lg">
+                            <h2 class="text-2xl font-bold mb-6 text-gray-800 text-center">Selecciona un tema para reflexionar</h2>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                ${Object.keys(allQuestionnaires).map(key => `
+                                    <button data-topic="${key}" class="topic-button bg-gray-100 p-6 rounded-xl shadow-md flex flex-col items-center text-center hover:bg-indigo-100 transition-colors h-full">
+                                        <h3 class="text-lg font-bold text-gray-800 mb-2">${allQuestionnaires[key].title}</h3>
+                                        <p class="text-sm text-gray-600">${allQuestionnaires[key].description}</p>
+                                    </button>
+                                `).join('')}
+                            </div>
+                            <div class="flex justify-center mt-6">
+                                <button id="back-to-user-info" class="w-full sm:w-auto px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-full shadow-md hover:bg-gray-300 transition-colors">Volver</button>
+                            </div>
+                        </div>
+                    `;
+                    document.querySelectorAll('.topic-button').forEach(button => {
+                        button.addEventListener('click', (e) => {
+                            selectedTopic = e.currentTarget.dataset.topic;
+                            answers = {};
+                            currentScreen = 'questions';
+                            render();
+                        });
+                    });
+                    document.getElementById('back-to-user-info').addEventListener('click', () => { currentScreen = 'userInfo'; render(); });
+                    break;
+
+                case 'questions':
+                    const currentQuestions = allQuestionnaires[selectedTopic]?.questions || [];
+                    const allAnswered = currentQuestions.every(q => answers.hasOwnProperty(q.id));
+                    appContainer.innerHTML = `
+                        <div class="w-full max-w-4xl mx-auto p-4 bg-white rounded-xl shadow-lg">
+                            <h2 class="text-2xl font-bold mb-6 text-gray-800 text-center">Cuestionario de ${allQuestionnaires[selectedTopic]?.title}</h2>
+                            ${currentQuestions.map(q => `
+                                <div class="mb-8">
+                                    <p class="text-lg font-medium mb-3 text-gray-700">${q.text}</p>
+                                    <div class="flex flex-wrap gap-2">
+                                        ${q.options.map(option => `
+                                            <button data-question-id="${q.id}" data-value="${option.value}" class="answer-button flex-1 px-4 py-2 text-sm font-semibold rounded-full border-2 transition-all duration-200 ease-in-out ${answers[q.id] === option.value ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-100 text-gray-800 border-gray-300 hover:bg-gray-200'}">
+                                                ${option.label}
+                                            </button>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            `).join('')}
+                            ${allAnswered ? `
+                                <div class="flex justify-center mt-6">
+                                    <button id="view-results" class="px-6 py-3 bg-green-500 text-white font-semibold rounded-full shadow-md hover:bg-green-600 transition-colors">Ver mis resultados</button>
+                                </div>
+                            ` : ''}
+                            <div class="flex justify-center mt-4">
+                                <button id="back-to-topics" class="w-full sm:w-auto px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-full shadow-md hover:bg-gray-300 transition-colors">Volver</button>
+                            </div>
+                        </div>
+                    `;
+                    document.querySelectorAll('.answer-button').forEach(button => {
+                        button.addEventListener('click', (e) => {
+                            const { questionId, value } = e.currentTarget.dataset;
+                            answers[questionId] = parseInt(value, 10);
+                            render();
+                        });
+                    });
+                    if (allAnswered) {
+                        document.getElementById('view-results').addEventListener('click', () => {
+                            saveResults();
+                            currentScreen = 'results';
+                            render();
+                        });
+                    }
+                    document.getElementById('back-to-topics').addEventListener('click', () => { currentScreen = 'topics'; render(); });
+                    break;
+                
+                case 'results':
+                    appContainer.innerHTML = `
+                        <div class="w-full max-w-2xl mx-auto">
+                            <div class="flex flex-col items-center text-center p-8 bg-white rounded-xl shadow-lg">
+                                <h2 class="text-3xl font-bold mb-4 text-gray-800">¡Gracias por responder!</h2>
+                                <p class="text-lg mb-6 text-gray-600">${allQuestionnaires[selectedTopic]?.resultMessage}</p>
+                                <p class="text-lg font-semibold text-gray-800 mb-4">Estamos aquí para ayudarte.</p>
+                                <div class="bg-gray-100 p-6 rounded-xl w-full max-w-md mb-8">
+                                    <h3 class="text-xl font-bold text-indigo-600 mb-2">Área de Orientación Psicológica</h3>
+                                    <p class="text-lg text-gray-700 font-medium">Escuela Secundaria General "Carmen Serdán"</p>
+                                    <div class="mt-4 text-left space-y-2">
+                                        <p class="text-base text-gray-600 flex items-center"><span class="mr-2 text-indigo-500 text-xl">📞</span> Teléfono: <a href="tel:+522454520168" class="ml-2 text-indigo-600 underline hover:text-indigo-700 transition-colors">+52 245 452 0168</a></p>
+                                        <p class="text-base text-gray-600 flex items-center"><span class="mr-2 text-indigo-500 text-xl">📧</span> Email: <a href="mailto:area1psic98carmen3serdan@gmail.com" class="ml-2 text-indigo-600 underline hover:text-indigo-700 transition-colors">area1psic98carmen3serdan@gmail.com</a></p>
+                                        <p class="text-base text-gray-600 flex items-start"><span class="mr-2 text-indigo-500 text-xl pt-1">📅</span><a href="https://calendar.app.google/vYmZGCQqPLGpHRCK7" target="_blank" rel="noopener noreferrer" class="text-indigo-600 underline hover:text-indigo-700 transition-colors">AGENDA TU ORIENTACION PSICOLOGICA</a></p>
+                                        ${selectedTopic === 'suicidio' ? `<p class="text-base text-red-600 mt-4 font-bold flex items-center"><span class="mr-2 text-xl">🚨</span> En caso de emergencia, por favor, llama al 911.</p>` : ''}
+                                    </div>
+                                </div>
+                                <button id="restart-app" class="w-full sm:w-auto mt-4 px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-full shadow-md hover:bg-gray-300 transition-colors">Volver a Inicio</button>
+                            </div>
+                        </div>
+                    `;
+                    document.getElementById('restart-app').addEventListener('click', () => {
+                        currentScreen = 'intro'; answers = {}; selectedTopic = null; grade = ''; group = ''; render();
+                    });
+                    break;
+
+                case 'dashboard':
+                    appContainer.innerHTML = `
+                        <div class="w-full max-w-6xl mx-auto p-4 bg-white rounded-xl shadow-lg">
+                            <div id="dashboard-content" class="p-4">
+                                <h2 class="text-2xl font-bold mb-2 text-gray-800 text-center">Análisis de Datos por Grado</h2>
+                                <p class="text-sm text-gray-600 text-center mb-8">Las puntuaciones promedio más altas indican que hay una mayor necesidad de apoyo en ese tema y en ese grado.</p>
+                                <div class="space-y-12">
+                                    ${Object.keys(allQuestionnaires).map(topic => `
+                                        <div class="flex flex-col items-center page-break">
+                                            <h3 class="text-xl font-semibold text-gray-800 mb-4">${allQuestionnaires[topic].title}</h3>
+                                            ${surveyData.filter(d => d.topic === topic).length > 0 ? `
+                                                <div class="w-full h-80"><canvas id="chart-${topic}"></canvas></div>
+                                            ` : `
+                                                <p class="text-center text-gray-500 py-10">Aún no hay datos para mostrar en esta categoría.</p>
+                                            `}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                            <div class="flex justify-center mt-8 gap-4">
+                                <button id="download-pdf" class="w-full sm:w-auto px-6 py-3 bg-green-600 text-white font-semibold rounded-full shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400" ${isDownloading ? 'disabled' : ''}>
+                                    ${isDownloading ? 'Generando PDF...' : 'Descargar en PDF'}
+                                </button>
+                                <button id="logout" class="w-full sm:w-auto px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-full shadow-md hover:bg-gray-300 transition-colors">Cerrar Sesión</button>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Destroy old charts before creating new ones
+                    Object.values(chartInstances).forEach(chart => chart.destroy());
+                    chartInstances = {};
+
+                    // Render new charts
+                    Object.keys(allQuestionnaires).forEach(topic => {
+                        const canvas = document.getElementById(`chart-${topic}`);
+                        if (canvas) {
+                            const chartData = processChartData(topic);
+                            chartInstances[topic] = new Chart(canvas, {
+                                type: 'bar',
+                                data: chartData,
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    scales: { y: { beginAtZero: true } }
+                                }
+                            });
+                        }
+                    });
+
+                    document.getElementById('download-pdf').addEventListener('click', downloadPDF);
+                    document.getElementById('logout').addEventListener('click', () => { currentScreen = 'intro'; render(); });
+                    break;
+            }
+        };
+
+        // --- INITIALIZATION ---
+        // Start the application by initializing Firebase and rendering the first screen.
+        initializeFirebase();
+
+    </script>
+</body>
+</html>
