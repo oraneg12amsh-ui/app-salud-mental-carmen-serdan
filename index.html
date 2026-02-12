@@ -53,37 +53,34 @@
           BookOpen, CheckCircle2, BrainCircuit, GraduationCap, User, 
           FileSignature, PenTool, Printer, Lock, X, Play, ArrowRight,
           ClipboardList, Eye, LogOut, Home, Eraser, Download, Cloud, ArrowLeft,
-          FileText, ListChecks, Save, Upload, Wifi, WifiOff
+          FileText, ListChecks, Save, Upload, Wifi, WifiOff, Check
         } from 'lucide-react';
         import html2canvas from 'html2canvas';
         import { jsPDF } from 'jspdf';
         
         // --- FIREBASE CONFIGURATION ---
         import { initializeApp } from "firebase/app";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, enableIndexedDbPersistence } from "firebase/firestore";
 
         // Global Variables
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'psicotest-default';
+        const appId = 'psicotest-ugm-prod'; 
 
-        // Initialize Firebase safely
+        // Initialize Firebase safely with USER CONFIGURATION ONLY
+        // We use a unique name "PsicoTestApp" to avoid conflicts with default app
         let auth, db, isFirebaseAvailable = false;
         try {
-            let config;
-            if (typeof __firebase_config !== 'undefined') {
-                config = JSON.parse(__firebase_config);
-            } else {
-                config = {
-                    apiKey: "AIzaSyDT9M_s82TJrxwFMMFFt_M7GrQdVUFXZ2c",
-                    authDomain: "plataforma-carmen-serdan.firebaseapp.com",
-                    projectId: "plataforma-carmen-serdan",
-                    storageBucket: "plataforma-carmen-serdan.firebasestorage.app",
-                    messagingSenderId: "124079826705",
-                    appId: "1:124079826705:web:5e2abd11506ae24accceb0",
-                    measurementId: "G-VCYFS0K3BB"
-                };
-            }
-            const app = initializeApp(config);
+            const config = {
+                apiKey: "AIzaSyAdwecMWMtlpKuAXez2t0odV0Eg1fQ9YD8",
+                authDomain: "app-salud-mental-b9484.firebaseapp.com",
+                projectId: "app-salud-mental-b9484",
+                storageBucket: "app-salud-mental-b9484.firebasestorage.app",
+                messagingSenderId: "953825291723",
+                appId: "1:953825291723:web:42146f985c805890fdda4e"
+            };
+            
+            // Pass a name to initializeApp to isolate this instance
+            const app = initializeApp(config, "PsicoTestApp");
             auth = getAuth(app);
             db = getFirestore(app);
             
@@ -93,10 +90,24 @@
             });
 
             isFirebaseAvailable = true;
-            console.log("Firebase initialized");
+            console.log("Firebase initialized: PsicoTestApp");
         } catch (e) {
-            console.warn("Firebase fallback mode.", e);
+            console.warn("Firebase initialization error", e);
             isFirebaseAvailable = false;
+        }
+
+        // Helper to get the correct collection - ALWAYS 'submissions' for user project
+        const getSubmissionsCollection = () => {
+            return collection(db, 'submissions');
+        };
+
+        // --- UTILS: SECURITY ---
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return hashHex;
         }
 
         // --- CONSTANTS ---
@@ -263,6 +274,7 @@
             const [isSaving, setIsSaving] = useState(false);
             const [dbError, setDbError] = useState(null);
             const [user, setUser] = useState(null);
+            const [saveStatus, setSaveStatus] = useState(null); // 'cloud', 'local', null
             
             const [currentScreen, setCurrentScreen] = useState('START');
             const [reportViewMode, setReportViewMode] = useState('SUMMARY');
@@ -291,11 +303,9 @@
                 }
                 const initAuth = async () => {
                     try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await signInWithCustomToken(auth, __initial_auth_token);
-                        } else {
-                            await signInAnonymously(auth);
-                        }
+                        // Always sign in anonymously to your specific project
+                        await signInAnonymously(auth);
+                        console.log("Authenticated anonymously");
                     } catch (error) {
                         console.error("Auth init error:", error);
                         setDbError("Error de autenticación. Modo local activado.");
@@ -309,14 +319,20 @@
                 if (currentScreen === 'ADMIN_PANEL') {
                     if (isFirebaseAvailable && user) {
                         try {
-                            const collRef = collection(db, 'artifacts', appId, 'public', 'data', 'submissions');
+                            const collRef = getSubmissionsCollection();
                             const unsubscribe = onSnapshot(collRef, (snapshot) => {
                                 const subs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                                 subs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                                 setSubmissions(subs);
-                            }, () => setSubmissions(localSubmissions));
+                            }, (error) => {
+                                console.error("Error fetching submissions:", error);
+                                setSubmissions(localSubmissions);
+                            });
                             return () => unsubscribe();
-                        } catch(e) { setSubmissions(localSubmissions); }
+                        } catch(e) { 
+                            console.error("Error setting up snapshot:", e);
+                            setSubmissions(localSubmissions); 
+                        }
                     } else {
                         setSubmissions(localSubmissions);
                     }
@@ -336,6 +352,7 @@
                 setMesactsAnswers({});
                 setTmmsAnswers({});
                 setHasSignature(false);
+                setSaveStatus(null);
                 setCurrentScreen('REGISTER');
             };
 
@@ -359,15 +376,18 @@
 
                 try {
                     if (isFirebaseAvailable && user) {
-                        // Using 'public' path so all shared links write to the same collection
-                        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'submissions'), submissionData);
+                        const collRef = getSubmissionsCollection();
+                        await addDoc(collRef, submissionData);
+                        setSaveStatus('cloud');
                     } else {
                         throw new Error("Local save fallback");
                     }
                     setCurrentScreen('THANK_YOU');
                 } catch (e) {
+                    console.log("Saving locally due to:", e.message);
                     const localSubmission = { ...submissionData, id: `local-${Date.now()}` };
                     setLocalSubmissions(prev => [localSubmission, ...prev]);
+                    setSaveStatus('local');
                     await new Promise(r => setTimeout(r, 800));
                     setCurrentScreen('THANK_YOU');
                 } finally {
@@ -378,6 +398,7 @@
             const handleAdminLogin = (e) => {
                 e.preventDefault();
                 try {
+                    // Contraseña "equipo6" en Base64
                     if (btoa(adminPasswordInput) === 'ZXF1aXBvNg==') {
                         setAdminPasswordInput('');
                         setLoginError(false);
@@ -510,7 +531,7 @@
                     {/* Connection Indicator */}
                     <div className="absolute bottom-4 right-4 flex items-center gap-2 text-xs font-medium bg-white/80 px-3 py-1.5 rounded-full shadow-sm border">
                         {isFirebaseAvailable && user ? (
-                            <><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> <span className="text-slate-600">Conectado</span></>
+                            <><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> <span className="text-slate-600">Conectado (Nube)</span></>
                         ) : (
                             <><span className="w-2 h-2 rounded-full bg-amber-500"></span> <span className="text-amber-700">Modo Local</span></>
                         )}
@@ -580,7 +601,16 @@
             );
 
             const renderThankYou = () => (
-                <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center p-6"><div className="bg-white max-w-md w-full p-10 rounded-3xl shadow-2xl text-center"><div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6"><CheckCircle2 size={40} /></div><h2 className="text-3xl font-black text-slate-800 mb-4">¡Muchas Gracias!</h2><p className="text-slate-600 mb-8 leading-relaxed">Has completado todas las pruebas exitosamente. Tus respuestas han sido guardadas.<br/>¡Agradecemos tu tiempo!</p><Button onClick={() => setCurrentScreen('START')} fullWidth className="bg-slate-900 hover:bg-black">Volver al Inicio</Button></div></div>
+                <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center p-6">
+                    <div className="bg-white max-w-md w-full p-10 rounded-3xl shadow-2xl text-center">
+                        <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6"><CheckCircle2 size={40} /></div>
+                        <h2 className="text-3xl font-black text-slate-800 mb-4">¡Muchas Gracias!</h2>
+                        <p className="text-slate-600 mb-4 leading-relaxed">Has completado todas las pruebas exitosamente. Tus respuestas han sido guardadas.<br/>¡Agradecemos tu tiempo!</p>
+                        {saveStatus === 'cloud' && <div className="mb-6 p-2 bg-green-50 text-green-700 text-sm rounded border border-green-200 flex items-center justify-center gap-2"><Cloud size={16} /> Datos guardados en la nube correctamente</div>}
+                        {saveStatus === 'local' && <div className="mb-6 p-2 bg-amber-50 text-amber-700 text-sm rounded border border-amber-200 flex items-center justify-center gap-2"><WifiOff size={16} /> Guardado local (Sin conexión)</div>}
+                        <Button onClick={() => setCurrentScreen('START')} fullWidth className="bg-slate-900 hover:bg-black">Volver al Inicio</Button>
+                    </div>
+                </div>
             );
 
             const renderAdminLogin = () => (
