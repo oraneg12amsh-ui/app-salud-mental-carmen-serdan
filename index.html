@@ -1,36 +1,697 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PsicoTest Pro</title>
+    <title>PsicoTest UGM</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&display=swap" rel="stylesheet">
     <style>
       body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+      .font-serif { font-family: 'Merriweather', serif; }
+      .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #888; border-radius: 3px; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #555; }
+      
+      /* Print styles */
+      @media print {
+        @page { margin: 1cm; size: portrait; }
+        body { background: white; -webkit-print-color-adjust: exact; }
+        .no-print { display: none !important; }
+        .break-before-page { page-break-before: always; }
+        .break-inside-avoid { page-break-inside: avoid; }
+      }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
-    "react/": "https://esm.sh/react@^19.2.4/",
-    "react": "https://esm.sh/react@^19.2.4",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "recharts": "https://esm.sh/recharts@^3.7.0",
-    "html2canvas": "https://esm.sh/html2canvas@^1.4.1",
-    "jspdf": "https://esm.sh/jspdf@^2.5.1",
-    "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
-    "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js",
-    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js",
-    "firebase/": "https://esm.sh/firebase@^12.9.0/"
-  }
-}
-</script>
-<link rel="stylesheet" href="/index.css">
+    
+    <!-- Import Map -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.292.0",
+        "html2canvas": "https://esm.sh/html2canvas@1.4.1",
+        "jspdf": "https://esm.sh/jspdf@2.5.1",
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+      }
+    }
+    </script>
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
-  <body>
+<body>
     <div id="root"></div>
-    <script type="module" src="./index.tsx"></script>
-  <script type="module" src="/index.tsx"></script>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useRef, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { 
+          BookOpen, CheckCircle2, BrainCircuit, GraduationCap, User, 
+          FileSignature, PenTool, Printer, Lock, X, Play, ArrowRight,
+          ClipboardList, Eye, LogOut, Home, Eraser, Download, Cloud, ArrowLeft,
+          FileText, ListChecks
+        } from 'lucide-react';
+        import html2canvas from 'html2canvas';
+        import { jsPDF } from 'jspdf';
+        
+        // --- FIREBASE CONFIGURATION ---
+        import { initializeApp } from "firebase/app";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from "firebase/firestore";
+
+        // Global Variables
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'psicotest-default';
+
+        // Initialize Firebase safely
+        let auth, db, isFirebaseAvailable = false;
+        try {
+            let config;
+            if (typeof __firebase_config !== 'undefined') {
+                config = JSON.parse(__firebase_config);
+            } else {
+                config = {
+                    apiKey: "AIzaSyDT9M_s82TJrxwFMMFFt_M7GrQdVUFXZ2c",
+                    authDomain: "plataforma-carmen-serdan.firebaseapp.com",
+                    projectId: "plataforma-carmen-serdan",
+                    storageBucket: "plataforma-carmen-serdan.firebasestorage.app",
+                    messagingSenderId: "124079826705",
+                    appId: "1:124079826705:web:5e2abd11506ae24accceb0",
+                    measurementId: "G-VCYFS0K3BB"
+                };
+            }
+            const app = initializeApp(config);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            isFirebaseAvailable = true;
+            console.log("Firebase initialized");
+        } catch (e) {
+            console.warn("Firebase fallback mode.", e);
+            isFirebaseAvailable = false;
+        }
+
+        // --- CONSTANTS ---
+        const MESACTS_QUESTIONS = [
+            { id: 1, text: "Me siento parte de esta escuela/colegio" },
+            { id: 2, text: "En mi escuela/colegio hay jóvenes en los que puedo confiar" },
+            { id: 3, text: "En mi escuela/colegio me siento seguro/a" },
+            { id: 4, text: "En mi escuela/colegio puedo hacer amigos/as" },
+            { id: 5, text: "En esta escuela/colegio puedo equivocarme sin ser juzgado/a" },
+            { id: 6, text: "En esta escuela/colegio no se discrimina a nadie" },
+            { id: 7, text: "En mi escuela/colegio me ayudan a encontrar diferentes formas de expresarme" },
+            { id: 8, text: "En mi escuela me dan herramientas para manejar los conflictos" },
+            { id: 9, text: "En mi escuela/colegio facilitan espacios de participación y expresión de jóvenes" },
+            { id: 10, text: "Dentro de mi escuela no hay situaciones de violencia (física, verbal, psicológica)" },
+            { id: 11, text: "En mi escuela/colegio hay adultos en los que puedo confiar" },
+        ];
+
+        const MESACTS_OPTIONS = [
+            { value: 1, label: "Totalmente en desacuerdo" },
+            { value: 2, label: "En desacuerdo" },
+            { value: 3, label: "De acuerdo" },
+            { value: 4, label: "Totalmente de acuerdo" },
+        ];
+
+        const TMMS24_QUESTIONS = [
+            { id: 1, text: "Presto mucha atención a los sentimientos." },
+            { id: 2, text: "Normalmente me preocupo mucho por lo que siento." },
+            { id: 3, text: "Normalmente dedico tiempo a pensar en mis emociones." },
+            { id: 4, text: "Pienso que merece la pena prestar atención a mis emociones y estado de ánimo." },
+            { id: 5, text: "Dejo que mis sentimientos afecten a mis pensamientos." },
+            { id: 6, text: "Pienso en mi estado de ánimo constantemente." },
+            { id: 7, text: "A menudo pienso en mis sentimientos." },
+            { id: 8, text: "Presto mucha atención a cómo me siento." },
+            { id: 9, text: "Tengo claros mis sentimientos." },
+            { id: 10, text: "Frecuentemente puedo definir mis sentimientos." },
+            { id: 11, text: "Casi siempre sé cómo me siento." },
+            { id: 12, text: "Normalmente conozco mis sentimientos sobre las personas." },
+            { id: 13, text: "A menudo me doy cuenta de mis sentimientos en diferentes situaciones." },
+            { id: 14, text: "Siempre puedo decir cómo me siento." },
+            { id: 15, text: "A veces puedo decir cuáles son mis emociones." },
+            { id: 16, text: "Puedo llegar a comprender mis sentimientos." },
+            { id: 17, text: "Aunque a veces me siento triste, suelo tener una visión optimista." },
+            { id: 18, text: "Aunque me sienta mal, procuro pensar en cosas agradables." },
+            { id: 19, text: "Cuando estoy triste, pienso en todos los placeres de la vida." },
+            { id: 20, text: "Intento tener pensamientos positivos aunque me sienta mal." },
+            { id: 21, text: "Si doy demasiadas vueltas a las cosas, complicándolas, trato de calmarme." },
+            { id: 22, text: "Me preocupo por tener un buen estado de ánimo." },
+            { id: 23, text: "Tengo mucha energía cuando me siento feliz." },
+            { id: 24, text: "Cuando estoy enfadado intento cambiar mi estado de ánimo." },
+        ];
+
+        const TMMS24_OPTIONS = [
+            { value: 1, label: "Nada de Acuerdo" },
+            { value: 2, label: "Algo de Acuerdo" },
+            { value: 3, label: "Bastante de acuerdo" },
+            { value: 4, label: "Muy de Acuerdo" },
+            { value: 5, label: "Totalmente de acuerdo" },
+        ];
+
+        // --- SCORING SERVICE ---
+        const calculateMesactsScore = (answers) => {
+            const pertenenciaIds = [1, 2, 3, 4];
+            const participacionIds = [7, 8, 9, 11];
+            const inclusividadIds = [5, 6, 10];
+            const sumIds = (ids) => ids.reduce((acc, id) => acc + (answers[id] || 0), 0);
+            
+            const total = sumIds(pertenenciaIds) + sumIds(participacionIds) + sumIds(inclusividadIds);
+
+            const getLevel = (score, lowMax, medLowMax, medHighMax) => {
+                if (score <= lowMax) return "Nivel Bajo";
+                if (score <= medLowMax) return "Nivel Medio-Bajo";
+                if (score <= medHighMax) return "Nivel Medio-Alto";
+                return "Nivel Alto";
+            };
+
+            return {
+                total,
+                subscales: { 
+                    pertenencia: sumIds(pertenenciaIds), 
+                    participacion: sumIds(participacionIds), 
+                    inclusividad: sumIds(inclusividadIds) 
+                },
+                interpretation: {
+                    total: getLevel(total, 19, 27, 35),
+                    pertenencia: getLevel(sumIds(pertenenciaIds), 7, 10, 13),
+                    participacion: getLevel(sumIds(participacionIds), 7, 10, 13),
+                    inclusividad: getLevel(sumIds(inclusividadIds), 5, 7, 9)
+                }
+            };
+        };
+
+        const calculateTmmsScore = (answers, gender) => {
+            const sumRange = (start, end) => {
+                let sum = 0;
+                for (let i = start; i <= end; i++) sum += (answers[i] || 0);
+                return sum;
+            };
+
+            const atencion = sumRange(1, 8);
+            const claridad = sumRange(9, 16);
+            const reparacion = sumRange(17, 24);
+
+            let interpAtencion, interpClaridad, interpReparacion;
+
+            if (gender === 'male') {
+                interpAtencion = atencion <= 21 ? "Poca atención" : (atencion <= 32 ? "Adecuada atención" : "Demasiada atención");
+                interpClaridad = claridad <= 25 ? "Debe mejorar" : (claridad <= 35 ? "Adecuada" : "Excelente");
+                interpReparacion = reparacion <= 23 ? "Debe mejorar" : (reparacion <= 35 ? "Adecuada" : "Excelente");
+            } else {
+                interpAtencion = atencion <= 24 ? "Poca atención" : (atencion <= 35 ? "Adecuada atención" : "Demasiada atención");
+                interpClaridad = claridad <= 23 ? "Debe mejorar" : (claridad <= 34 ? "Adecuada" : "Excelente");
+                interpReparacion = reparacion <= 23 ? "Debe mejorar" : (reparacion <= 34 ? "Adecuada" : "Excelente");
+            }
+
+            return {
+                atencion, claridad, reparacion,
+                interpretation: { atencion: interpAtencion, claridad: interpClaridad, reparacion: interpReparacion }
+            };
+        };
+
+        // --- COMPONENTS ---
+        const Button = ({ children, variant = 'primary', fullWidth = false, className = '', ...props }) => {
+            const baseStyles = "px-4 py-2 rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed";
+            const variants = {
+                primary: "bg-indigo-600 text-white hover:bg-indigo-700 focus:ring-indigo-500",
+                secondary: "bg-teal-600 text-white hover:bg-teal-700 focus:ring-teal-500",
+                outline: "border-2 border-slate-300 text-slate-700 hover:border-slate-400 focus:ring-slate-400",
+                ghost: "bg-transparent text-slate-600 hover:bg-slate-100",
+            };
+            return (
+                <button className={`${baseStyles} ${variants[variant]} ${fullWidth ? 'w-full' : ''} ${className}`} {...props}>
+                    {children}
+                </button>
+            );
+        };
+
+        const TestLayout = ({ title, subtitle, onBack, progress, children }) => (
+            <div className="min-h-screen bg-slate-50 flex flex-col">
+                <header className="bg-white shadow-sm sticky top-0 z-10 no-print">
+                    <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                            {onBack && <Button variant="ghost" onClick={onBack} className="p-2"><ArrowLeft size={20} /></Button>}
+                            <div>
+                                <h1 className="text-lg font-bold text-slate-800 leading-tight">{title}</h1>
+                                <p className="text-xs text-slate-500">{subtitle}</p>
+                            </div>
+                        </div>
+                        <div className="text-sm font-semibold text-indigo-600">{Math.round(progress)}%</div>
+                    </div>
+                    <div className="h-1 w-full bg-slate-200">
+                        <div className="h-full bg-indigo-600 transition-all duration-300" style={{ width: `${progress}%` }} />
+                    </div>
+                </header>
+                <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-8">
+                    {children}
+                </main>
+            </div>
+        );
+
+        // --- MAIN APP ---
+        const App = () => {
+            const [submissions, setSubmissions] = useState([]);
+            const [localSubmissions, setLocalSubmissions] = useState([]);
+            const [isSaving, setIsSaving] = useState(false);
+            const [dbError, setDbError] = useState(null);
+            const [user, setUser] = useState(null);
+            
+            const [currentScreen, setCurrentScreen] = useState('START');
+            const [reportViewMode, setReportViewMode] = useState('SUMMARY');
+            
+            const [userData, setUserData] = useState({
+                studentName: '', guardianName: '', grade: '', group: '',
+                gender: 'female', city: '', signature: '', timestamp: ''
+            });
+
+            const [mesactsAnswers, setMesactsAnswers] = useState({});
+            const [tmmsAnswers, setTmmsAnswers] = useState({});
+            const [adminPasswordInput, setAdminPasswordInput] = useState('');
+            const [loginError, setLoginError] = useState(false);
+            const [selectedSubmission, setSelectedSubmission] = useState(null);
+            const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+
+            const canvasRef = useRef(null);
+            const [isDrawing, setIsDrawing] = useState(false);
+            const [hasSignature, setHasSignature] = useState(false);
+
+            useEffect(() => {
+                if (!isFirebaseAvailable) {
+                     setDbError("Modo Demo: Base de datos no conectada.");
+                     return;
+                }
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Auth init error:", error);
+                        setDbError("Error de autenticación. Modo local activado.");
+                    }
+                };
+                initAuth();
+                return onAuthStateChanged(auth, setUser);
+            }, []);
+
+            useEffect(() => {
+                if (currentScreen === 'ADMIN_PANEL') {
+                    if (isFirebaseAvailable && user) {
+                        try {
+                            const collRef = collection(db, 'artifacts', appId, 'public', 'data', 'submissions');
+                            const unsubscribe = onSnapshot(collRef, (snapshot) => {
+                                const subs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                                subs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                                setSubmissions(subs);
+                            }, () => setSubmissions(localSubmissions));
+                            return () => unsubscribe();
+                        } catch(e) { setSubmissions(localSubmissions); }
+                    } else {
+                        setSubmissions(localSubmissions);
+                    }
+                }
+            }, [currentScreen, localSubmissions, user]);
+
+            const handleInputChange = (e) => {
+                const { name, value } = e.target;
+                setUserData(prev => ({ ...prev, [name]: value }));
+            };
+
+            const startNewSession = () => {
+                setUserData({
+                    studentName: '', guardianName: '', grade: '', group: '',
+                    gender: 'female', city: '', signature: '', timestamp: new Date().toISOString()
+                });
+                setMesactsAnswers({});
+                setTmmsAnswers({});
+                setHasSignature(false);
+                setCurrentScreen('REGISTER');
+            };
+
+            const finishSession = async () => {
+                setIsSaving(true);
+                const mesactsScore = calculateMesactsScore(mesactsAnswers);
+                const tmmsScore = calculateTmmsScore(tmmsAnswers, userData.gender);
+                const timestamp = new Date();
+
+                const submissionData = {
+                    userData: { 
+                        ...userData, 
+                        timestamp: timestamp.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) 
+                    },
+                    mesactsAnswers,
+                    tmmsAnswers,
+                    mesactsScore,
+                    tmmsScore,
+                    createdAt: timestamp.toISOString()
+                };
+
+                try {
+                    if (isFirebaseAvailable && user) {
+                        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'submissions'), submissionData);
+                    } else {
+                        throw new Error("Local save fallback");
+                    }
+                    setCurrentScreen('THANK_YOU');
+                } catch (e) {
+                    const localSubmission = { ...submissionData, id: `local-${Date.now()}` };
+                    setLocalSubmissions(prev => [localSubmission, ...prev]);
+                    await new Promise(r => setTimeout(r, 800));
+                    setCurrentScreen('THANK_YOU');
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            const handleAdminLogin = (e) => {
+                e.preventDefault();
+                // Base64 check for "equipo6" -> 'ZXF1aXBvNg=='
+                try {
+                    if (btoa(adminPasswordInput) === 'ZXF1aXBvNg==') {
+                        setAdminPasswordInput('');
+                        setLoginError(false);
+                        setCurrentScreen('ADMIN_PANEL');
+                    } else {
+                        setLoginError(true);
+                    }
+                } catch (err) {
+                    setLoginError(true);
+                }
+            };
+
+            const handleDownloadPdf = async () => {
+                const element = document.getElementById('printable-area');
+                if (!element) return;
+                setIsGeneratingPdf(true);
+                try {
+                    const originalBg = element.style.backgroundColor;
+                    element.style.backgroundColor = '#ffffff';
+                    const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' });
+                    element.style.backgroundColor = originalBg;
+                    const imgData = canvas.toDataURL('image/png');
+                    const pdf = new jsPDF('p', 'mm', 'a4');
+                    const imgWidth = 210;
+                    const pageHeight = 297;
+                    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                    let heightLeft = imgHeight;
+                    let position = 0;
+                    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+                    while (heightLeft >= 0) {
+                        position = heightLeft - imgHeight;
+                        pdf.addPage();
+                        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+                        heightLeft -= pageHeight;
+                    }
+                    const safeName = userData.studentName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                    const suffix = reportViewMode === 'SUMMARY' ? 'Expediente' : (reportViewMode === 'ANSWERS' ? 'Respuestas' : 'Consentimiento');
+                    pdf.save(`${suffix}_${safeName}.pdf`);
+                } catch (err) { alert("Error al generar PDF."); } finally { setIsGeneratingPdf(false); }
+            };
+
+            // Canvas logic
+            const startDrawing = (e) => {
+                const ctx = canvasRef.current?.getContext('2d');
+                if(!ctx) return;
+                setIsDrawing(true);
+                const rect = canvasRef.current.getBoundingClientRect();
+                const x = (e.touches ? e.touches[0].clientX : e.nativeEvent.offsetX) - (e.touches ? rect.left : 0);
+                const y = (e.touches ? e.touches[0].clientY : e.nativeEvent.offsetY) - (e.touches ? rect.top : 0);
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineWidth = 2;
+                ctx.lineCap = 'round';
+                ctx.strokeStyle = '#000000';
+            };
+            const draw = (e) => {
+                if (!isDrawing) return;
+                const ctx = canvasRef.current.getContext('2d');
+                const rect = canvasRef.current.getBoundingClientRect();
+                const x = (e.touches ? e.touches[0].clientX : e.nativeEvent.offsetX) - (e.touches ? rect.left : 0);
+                const y = (e.touches ? e.touches[0].clientY : e.nativeEvent.offsetY) - (e.touches ? rect.top : 0);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+                if (!hasSignature) setHasSignature(true);
+            };
+            const endDrawing = () => {
+                setIsDrawing(false);
+                if (canvasRef.current) setUserData(prev => ({...prev, signature: canvasRef.current.toDataURL()}));
+            };
+            const clearSignature = () => {
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                setHasSignature(false);
+                setUserData(prev => ({...prev, signature: ''}));
+            };
+
+            const renderStart = () => (
+                <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 relative">
+                    <button onClick={() => setCurrentScreen('ADMIN_LOGIN')} className="absolute top-6 right-6 p-3 text-slate-400 hover:text-indigo-600 bg-white rounded-full shadow-sm border"><Lock size={20} /></button>
+                    <div className="text-center max-w-2xl w-full">
+                        <div className="mb-8 flex justify-center"><div className="bg-white p-4 rounded-3xl shadow-lg rotate-3"><BrainCircuit size={64} className="text-indigo-600" /></div></div>
+                        <h1 className="text-4xl md:text-6xl font-black text-slate-900 tracking-tight mb-4">PsicoTest <span className="text-indigo-600">UGM</span></h1>
+                        <p className="text-base md:text-lg text-slate-600 mb-10 max-w-lg mx-auto leading-relaxed px-4">Plataforma de evaluación de bienestar escolar e inteligencia emocional.<br/><span className="text-sm text-slate-400 block mt-2">Escuela Secundaria Técnica Número 7</span></p>
+                        <button onClick={startNewSession} className="px-8 py-4 font-bold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 hover:scale-105 shadow-xl transition-all flex items-center mx-auto"><span>Comenzar Evaluación</span><ArrowRight className="ml-2 w-5 h-5" /></button>
+                    </div>
+                </div>
+            );
+
+            const renderRegister = () => (
+                <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+                  <div className="bg-white max-w-lg w-full rounded-2xl shadow-xl p-6 md:p-8 border border-slate-100">
+                    <div className="text-center mb-8"><div className="bg-indigo-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"><User className="text-indigo-600 w-8 h-8" /></div><h1 className="text-2xl font-bold text-slate-800">Datos del Estudiante</h1><p className="text-slate-500 text-sm">Por favor, completa la información para iniciar.</p></div>
+                    <div className="space-y-4">
+                      <div><label className="block text-sm font-medium text-slate-700 mb-1">Nombre del Alumno(a)</label><input type="text" name="studentName" value={userData.studentName} onChange={handleInputChange} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Nombre completo" /></div>
+                      <div><label className="block text-sm font-medium text-slate-700 mb-1">Nombre del Padre/Tutor</label><input type="text" name="guardianName" value={userData.guardianName} onChange={handleInputChange} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Quien autoriza" /></div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div><label className="block text-sm font-medium text-slate-700 mb-1">Grado</label><input type="text" name="grade" value={userData.grade} onChange={handleInputChange} className="w-full px-4 py-2 rounded-lg border border-slate-300 outline-none" placeholder="Ej. 2do" /></div>
+                        <div><label className="block text-sm font-medium text-slate-700 mb-1">Grupo</label><input type="text" name="group" value={userData.group} onChange={handleInputChange} className="w-full px-4 py-2 rounded-lg border border-slate-300 outline-none" placeholder="Ej. B" /></div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div><label className="block text-sm font-medium text-slate-700 mb-1">Género</label><select name="gender" value={userData.gender} onChange={handleInputChange} className="w-full px-4 py-2 rounded-lg border border-slate-300 bg-white"><option value="female">Femenino</option><option value="male">Masculino</option></select></div>
+                        <div><label className="block text-sm font-medium text-slate-700 mb-1">Ciudad</label><input type="text" name="city" value={userData.city} onChange={handleInputChange} className="w-full px-4 py-2 rounded-lg border border-slate-300 outline-none" placeholder="Ej. CDMX" /></div>
+                      </div>
+                    </div>
+                    <div className="mt-8"><Button fullWidth onClick={() => setCurrentScreen('CONSENT')} disabled={!userData.studentName || !userData.guardianName || !userData.city}>Continuar</Button><button onClick={() => setCurrentScreen('START')} className="w-full text-center mt-4 text-xs text-slate-400 hover:text-red-500">Cancelar y volver</button></div>
+                  </div>
+                </div>
+            );
+
+            const renderConsent = () => {
+                const date = new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
+                return (
+                  <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 md:p-8">
+                    <div className="bg-white max-w-3xl w-full shadow-2xl p-6 md:p-12 border border-slate-200 relative">
+                       <div className="absolute top-0 left-0 w-full h-2 bg-slate-800"></div>
+                      <h2 className="text-xl md:text-2xl font-bold text-center text-slate-900 mb-8 uppercase tracking-wide border-b pb-4">CARTA DE CONSENTIMIENTO INFORMADO</h2>
+                      <div className="font-serif text-slate-800 space-y-6 leading-relaxed text-justify text-sm md:text-base h-80 md:h-96 overflow-y-auto pr-2 custom-scrollbar">
+                        <p className="font-bold text-right">Lugar y fecha: <span className="font-normal border-b border-black px-2">{userData.city || '_______'}, {date}</span></p>
+                        <p className="font-bold text-right">Asunto: <span className="font-normal">Autorización para la aplicación de pruebas académicas. Nivel: Secundaria</span></p>
+                        <p>Por medio de la presente, yo <span className="font-bold border-b border-black px-1">{userData.guardianName}</span>, padre, madre o tutor legal del alumno(a) <span className="font-bold border-b border-black px-1">{userData.studentName}</span>, quien cursa el nivel de educación secundaria en la <span className="font-bold">Escuela Secundaria Técnica Número 7</span>, autorizo de manera voluntaria e informada su participación en la aplicación de dos pruebas correspondientes a la asignatura de Metodología de la Investigación.</p>
+                        <p>Las pruebas que se aplicarán son las siguientes:</p>
+                        <ul className="list-disc pl-8 space-y-2"><li><span className="font-bold">Escala TMMS-24</span>, instrumento que permite conocer la percepción, comprensión y manejo de las emociones.</li><li><span className="font-bold">Batería de Bienestar Educativo (MESACTS)</span>, la cual evalúa aspectos relacionados con el bienestar del estudiante dentro del entorno escolar.</li></ul>
+                        <p>Ambas pruebas tienen un <strong>propósito exclusivamente educativo y académico</strong>. Su aplicación se realizará dentro del horario escolar, bajo la supervisión del docente responsable, y <strong>no representan ningún riesgo físico, emocional ni psicológico</strong> para el alumno(a).</p>
+                        <p>Se garantiza que la información y los resultados obtenidos serán tratados con <strong>estricta confidencialidad</strong>, respetando la privacidad del estudiante, y serán utilizados únicamente para fines escolares y de evaluación del aprendizaje.</p>
+                        <p>Después de haber recibido la información correspondiente y comprender el objetivo de las pruebas, expreso mi conformidad y otorgo el consentimiento para que mi hijo(a) participe en las mismas.</p>
+                        <div className="mt-8 pt-4 text-center border-t border-slate-100 pb-8"><p className="font-bold mb-4">Firma del Tutor</p><div className="flex flex-col items-center justify-center"><div className="relative border-2 border-dashed border-slate-300 bg-slate-50 rounded-lg p-2 hover:border-indigo-300 transition-colors w-full max-w-[320px] flex justify-center">{!hasSignature && (<div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 pointer-events-none"><PenTool size={24} className="mb-2 opacity-50" /><span className="text-xs">Firme aquí (dedo o ratón)</span></div>)}<canvas ref={canvasRef} width={300} height={160} style={{ touchAction: 'none' }} className="cursor-crosshair bg-transparent" onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={endDrawing} onMouseLeave={endDrawing} onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={endDrawing} /></div><div className="flex gap-2 mt-2"><button onClick={clearSignature} className="text-xs flex items-center gap-1 text-slate-500 hover:text-red-600 px-3 py-1 rounded border border-slate-200" disabled={!hasSignature}><Eraser size={12} /> Borrar</button></div></div></div>
+                      </div>
+                      <div className="mt-8 flex justify-end"><Button onClick={() => setCurrentScreen('MESACTS')} className="w-full md:w-auto shadow-lg" disabled={!hasSignature}>Aceptar y Comenzar <ArrowRight size={16} className="ml-2 inline" /></Button></div>
+                    </div>
+                  </div>
+                );
+            };
+
+            const renderMesacts = () => (
+                <TestLayout title="1. Batería de Bienestar (MESACTS)" subtitle={`Estudiante: ${userData.studentName}`} onBack={() => {}} progress={(Object.keys(mesactsAnswers).length / MESACTS_QUESTIONS.length) * 100}>
+                    <div className="bg-indigo-600 rounded-xl p-4 md:p-6 text-white mb-6 md:mb-8 shadow-lg"><div className="flex items-start gap-4"><div className="bg-white/20 p-2 rounded-lg shrink-0"><GraduationCap size={24} /></div><div><h3 className="font-bold text-lg mb-1">Instrucciones</h3><p className="text-indigo-100 text-sm">Lee cada frase cuidadosamente. Selecciona la opción que mejor describa cómo te sientes. No hay respuestas incorrectas.</p></div></div></div>
+                    <div className="space-y-6">{MESACTS_QUESTIONS.map((q) => (<div key={q.id} className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-100"><h3 className="text-base md:text-lg font-medium text-slate-800 mb-4 flex gap-3"><span className="text-slate-300 font-bold shrink-0">{q.id}.</span> {q.text}</h3><div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">{MESACTS_OPTIONS.map((opt) => (<button key={opt.value} onClick={() => setMesactsAnswers(prev => ({ ...prev, [q.id]: opt.value }))} className={`px-3 py-4 rounded-lg text-sm font-medium border transition-all ${mesactsAnswers[q.id] === opt.value ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white'}`}>{opt.label}</button>))}</div></div>))}</div>
+                    <div className="mt-12 flex justify-end pb-12"><Button disabled={Object.keys(mesactsAnswers).length !== MESACTS_QUESTIONS.length} onClick={() => { window.scrollTo(0,0); setCurrentScreen('TMMS24'); }} className={Object.keys(mesactsAnswers).length !== MESACTS_QUESTIONS.length ? "opacity-50" : "shadow-xl"}>Siguiente Prueba <ArrowRight size={16} className="ml-2 inline" /></Button></div>
+                </TestLayout>
+            );
+
+            const renderTmms24 = () => (
+                <TestLayout title="2. Inteligencia Emocional (TMMS-24)" subtitle={`Estudiante: ${userData.studentName}`} onBack={() => {}} progress={(Object.keys(tmmsAnswers).length / TMMS24_QUESTIONS.length) * 100}>
+                     <div className="bg-teal-600 rounded-xl p-4 md:p-6 text-white mb-6 md:mb-8 shadow-lg"><div className="flex items-start gap-4"><div className="bg-white/20 p-2 rounded-lg shrink-0"><BrainCircuit size={24} /></div><div><h3 className="font-bold text-lg mb-1">Instrucciones</h3><p className="text-teal-100 text-sm">Indica con qué frecuencia sientes o piensas lo descrito. Sé sincero/a.</p></div></div></div>
+                    <div className="space-y-6">{TMMS24_QUESTIONS.map((q) => (<div key={q.id} className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-100"><h3 className="text-base md:text-lg font-medium text-slate-800 mb-4 flex gap-3"><span className="text-slate-300 font-bold shrink-0">{q.id}.</span> {q.text}</h3><div className="grid grid-cols-1 sm:grid-cols-5 gap-2">{TMMS24_OPTIONS.map((opt) => (<button key={opt.value} onClick={() => setTmmsAnswers(prev => ({ ...prev, [q.id]: opt.value }))} className={`px-2 py-3 rounded-lg text-xs md:text-sm font-medium border transition-all ${tmmsAnswers[q.id] === opt.value ? 'bg-teal-600 text-white border-teal-600 shadow-md ring-2 ring-teal-200' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white'}`}>{opt.label}</button>))}</div></div>))}</div>
+                    <div className="mt-12 flex justify-end pb-12"><Button variant="secondary" disabled={Object.keys(tmmsAnswers).length !== TMMS24_QUESTIONS.length || isSaving} onClick={finishSession} className={Object.keys(tmmsAnswers).length !== TMMS24_QUESTIONS.length ? "opacity-50" : "shadow-xl"}>{isSaving ? "Guardando..." : "Finalizar Todo"} {!isSaving && <CheckCircle2 size={16} className="ml-2 inline" />}</Button></div>
+                </TestLayout>
+            );
+
+            const renderThankYou = () => (
+                <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center p-6"><div className="bg-white max-w-md w-full p-10 rounded-3xl shadow-2xl text-center"><div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6"><CheckCircle2 size={40} /></div><h2 className="text-3xl font-black text-slate-800 mb-4">¡Muchas Gracias!</h2><p className="text-slate-600 mb-8 leading-relaxed">Has completado todas las pruebas exitosamente. Tus respuestas han sido guardadas.<br/>¡Agradecemos tu tiempo!</p><Button onClick={() => setCurrentScreen('START')} fullWidth className="bg-slate-900 hover:bg-black">Volver al Inicio</Button></div></div>
+            );
+
+            const renderAdminLogin = () => (
+                <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+                   <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-sm relative">
+                        <button onClick={() => setCurrentScreen('START')} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X size={20} /></button>
+                        <div className="text-center mb-6"><div className="bg-indigo-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"><Lock className="text-indigo-600" size={24} /></div><h3 className="text-lg font-bold text-slate-800">Panel Docente</h3></div>
+                        <form onSubmit={handleAdminLogin}>
+                          <div className="mb-6"><input type="password" value={adminPasswordInput} onChange={(e) => setAdminPasswordInput(e.target.value)} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Contraseña" autoFocus />{loginError && <p className="text-xs text-red-500 mt-2 font-bold flex items-center gap-1"><X size={12}/> Contraseña incorrecta</p>}</div>
+                          <Button fullWidth type="submit">Entrar</Button>
+                        </form>
+                      </div>
+                </div>
+            );
+
+            const renderAdminPanel = () => {
+                if (selectedSubmission) return renderDetailedReport(selectedSubmission);
+                return (
+                  <div className="min-h-screen bg-slate-100 p-4 md:p-8">
+                    <div className="max-w-6xl mx-auto">
+                      <div className="flex justify-between items-center mb-8"><div><h1 className="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2">Panel de Control <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 font-medium ${isFirebaseAvailable ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}><Cloud size={12}/> {isFirebaseAvailable ? 'En línea' : 'Modo Local'}</span></h1></div><Button onClick={() => setCurrentScreen('START')} variant="outline" className="flex items-center gap-2"><LogOut size={16} /> Salir</Button></div>
+                      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        {submissions.length === 0 ? (
+                           <div className="p-12 text-center text-slate-400 flex flex-col items-center"><ClipboardList size={48} className="mb-4 opacity-50" /><p>No hay evaluaciones registradas aún.</p></div>
+                        ) : (
+                          <div className="overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap md:whitespace-normal"><thead className="bg-slate-50 border-b border-slate-200"><tr><th className="p-4 font-bold text-slate-600">Nombre</th><th className="p-4 font-bold text-slate-600">Grado/Grupo</th><th className="p-4 font-bold text-slate-600">Fecha</th><th className="p-4 font-bold text-slate-600 text-right">Acciones</th></tr></thead><tbody className="divide-y divide-slate-100">{submissions.map((sub) => (<tr key={sub.id} className="hover:bg-indigo-50/50 transition-colors"><td className="p-4 font-medium text-slate-800">{sub.userData.studentName}</td><td className="p-4 text-slate-600">{sub.userData.grade} "{sub.userData.group}"</td><td className="p-4 text-slate-600">{sub.userData.timestamp}</td><td className="p-4 text-right"><button onClick={() => setSelectedSubmission(sub)} className="text-indigo-600 hover:text-indigo-800 font-bold text-xs bg-indigo-50 px-3 py-2 rounded-full border border-indigo-100 hover:border-indigo-300 flex items-center gap-1"><Eye size={14} /> Ver</button></td></tr>))}</tbody></table></div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+            };
+
+            const renderDetailedReport = (submission) => {
+                const { userData, mesactsScore, tmmsScore, mesactsAnswers, tmmsAnswers } = submission;
+                return (
+                  <div className="min-h-screen bg-slate-100 p-4 md:p-8">
+                    <div className="max-w-5xl mx-auto mb-6 flex flex-col md:flex-row gap-4 justify-between items-center no-print">
+                       <div className="flex items-center gap-2">
+                           <Button variant="ghost" onClick={() => setSelectedSubmission(null)} className="flex items-center gap-2"><ArrowLeft size={20} /> Volver</Button>
+                           <div className="h-8 w-px bg-slate-300 mx-2"></div>
+                           <div className="flex bg-white rounded-lg p-1 shadow-sm border border-slate-200">
+                                {['SUMMARY', 'ANSWERS', 'CONSENT'].map(mode => (
+                                    <button key={mode} onClick={() => setReportViewMode(mode)} className={`px-4 py-2 rounded-md text-sm font-bold transition-colors flex items-center gap-2 ${reportViewMode === mode ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>
+                                        {mode === 'SUMMARY' && <FileText size={16} />}
+                                        {mode === 'ANSWERS' && <ListChecks size={16} />}
+                                        {mode === 'CONSENT' && <FileSignature size={16} />}
+                                        {mode === 'SUMMARY' ? 'Expediente' : mode === 'ANSWERS' ? 'Respuestas' : 'Consentimiento'}
+                                    </button>
+                                ))}
+                            </div>
+                       </div>
+                       <div className="flex gap-2">
+                         <Button onClick={() => window.print()} variant="outline" className="flex items-center gap-2"><Printer size={20} /> Imprimir</Button>
+                         <Button onClick={handleDownloadPdf} disabled={isGeneratingPdf} className="flex items-center gap-2 shadow-lg bg-slate-800 hover:bg-black"><Download size={20} /> {isGeneratingPdf ? 'Generando...' : `Descargar ${reportViewMode === 'SUMMARY' ? 'Expediente' : (reportViewMode === 'ANSWERS' ? 'Respuestas' : 'Consentimiento')}`}</Button>
+                       </div>
+                    </div>
+                    <div id="printable-area" className="max-w-5xl mx-auto bg-white shadow-2xl p-6 md:p-12 print:shadow-none print:p-0 min-h-[1123px]">
+                      {reportViewMode !== 'CONSENT' && (
+                          <div className="border-b-2 border-slate-800 pb-6 mb-8 flex justify-between items-start">
+                             <div><h1 className="text-2xl md:text-3xl font-bold text-slate-900 uppercase tracking-wider">{reportViewMode === 'SUMMARY' ? 'Expediente Psicoeducativo' : 'Hoja de Respuestas'}</h1><p className="text-slate-500 mt-2">{reportViewMode === 'SUMMARY' ? 'Informe Integral de Resultados' : 'Registro Detallado de Selección'}</p></div>
+                             <div className="text-right"><p className="font-bold text-slate-800">PsicoTest UGM</p><p className="text-sm text-slate-500">{userData.timestamp}</p></div>
+                          </div>
+                      )}
+
+                      {reportViewMode === 'SUMMARY' && (
+                          <>
+                              <div className="mb-8 p-4 md:p-6 bg-slate-50 rounded-lg border border-slate-200 print:bg-transparent print:border-slate-300">
+                                 <h2 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-200 pb-2 uppercase text-sm tracking-wide">Datos del Estudiante</h2>
+                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                    <div><span className="font-bold text-slate-500 block">Nombre:</span> {userData.studentName}</div>
+                                    <div><span className="font-bold text-slate-500 block">Tutor Legal:</span> {userData.guardianName}</div>
+                                    <div><span className="font-bold text-slate-500 block">Grado/Grupo:</span> {userData.grade} "{userData.group}"</div>
+                                    <div><span className="font-bold text-slate-500 block">Género:</span> {userData.gender === 'male' ? 'Masculino' : 'Femenino'}</div>
+                                 </div>
+                              </div>
+                              <div className="mb-8 break-inside-avoid">
+                                <h2 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-200 pb-2 uppercase text-sm tracking-wide">Consentimiento</h2>
+                                <div className="flex items-center gap-6 border border-slate-200 p-4 rounded-lg">
+                                   <div className="flex-1 text-sm text-slate-700 italic">"Por medio de la presente, yo {userData.guardianName}, autorizo la participación..."</div>
+                                   <div className="w-48 border border-slate-300 bg-slate-50 p-2 text-center">{userData.signature ? <img src={userData.signature} className="w-full h-auto" /> : <span className="text-xs text-red-500">Sin firma</span>}</div>
+                                </div>
+                              </div>
+                              <div className="mb-8 break-inside-avoid">
+                                <h2 className="text-lg font-bold text-slate-800 uppercase text-sm tracking-wide mb-4 border-b border-slate-200 pb-2">Resultados MESACTS</h2>
+                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                     <div className="bg-indigo-50 p-4 rounded border border-indigo-100 print:bg-transparent print:border-slate-300 text-center">
+                                        <span className="block text-xs uppercase font-bold text-slate-500">Puntuación Total</span>
+                                        <span className="text-4xl font-black text-indigo-700 print:text-black">{mesactsScore.total}/44</span>
+                                        <span className="block font-bold text-indigo-800 print:text-black mt-1">{mesactsScore.interpretation.total}</span>
+                                     </div>
+                                     <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between border-b pb-1"><span>Pertenencia:</span><span className="font-bold">{mesactsScore.subscales.pertenencia} ({mesactsScore.interpretation.pertenencia})</span></div>
+                                        <div className="flex justify-between border-b pb-1"><span>Participación:</span><span className="font-bold">{mesactsScore.subscales.participacion} ({mesactsScore.interpretation.participacion})</span></div>
+                                        <div className="flex justify-between border-b pb-1"><span>Inclusividad:</span><span className="font-bold">{mesactsScore.subscales.inclusividad} ({mesactsScore.interpretation.inclusividad})</span></div>
+                                     </div>
+                                  </div>
+                              </div>
+                              <div className="mb-8 break-inside-avoid">
+                                 <h2 className="text-lg font-bold text-slate-800 uppercase text-sm tracking-wide mb-4 border-b border-slate-200 pb-2">Resultados TMMS-24</h2>
+                                  <table className="w-full text-sm text-left border-collapse">
+                                     <thead><tr className="bg-slate-100 print:bg-slate-200"><th className="p-2 border">Dimensión</th><th className="p-2 border text-center">Puntaje</th><th className="p-2 border">Interpretación</th></tr></thead>
+                                     <tbody>
+                                       <tr><td className="p-2 border font-bold">Atención</td><td className="p-2 border text-center">{tmmsScore.atencion}</td><td className="p-2 border">{tmmsScore.interpretation.atencion}</td></tr>
+                                       <tr><td className="p-2 border font-bold">Claridad</td><td className="p-2 border text-center">{tmmsScore.claridad}</td><td className="p-2 border">{tmmsScore.interpretation.claridad}</td></tr>
+                                       <tr><td className="p-2 border font-bold">Reparación</td><td className="p-2 border text-center">{tmmsScore.reparacion}</td><td className="p-2 border">{tmmsScore.interpretation.reparacion}</td></tr>
+                                     </tbody>
+                                   </table>
+                              </div>
+                          </>
+                      )}
+
+                      {reportViewMode === 'ANSWERS' && (
+                          <>
+                             <div className="mb-8 pb-4 border-b border-slate-100 flex gap-6 text-sm text-slate-600"><div><span className="font-bold">Alumno:</span> {userData.studentName}</div><div><span className="font-bold">Grado:</span> {userData.grade} "{userData.group}"</div></div>
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div>
+                                    <h3 className="font-bold text-slate-800 border-b-2 border-indigo-600 pb-2 mb-4">MESACTS (Bienestar)</h3>
+                                    <table className="w-full text-xs"><thead><tr className="text-left text-slate-400 border-b"><th className="pb-2 w-8">#</th><th className="pb-2">Pregunta</th><th className="pb-2 w-24 text-right">Respuesta</th></tr></thead><tbody className="divide-y divide-slate-100">{MESACTS_QUESTIONS.map(q => (<tr key={q.id}><td className="py-2 font-bold text-slate-400 align-top">{q.id}</td><td className="py-2 pr-2 align-top">{q.text}</td><td className="py-2 text-right font-medium text-indigo-700 align-top whitespace-normal">{MESACTS_OPTIONS.find(o => o.value === mesactsAnswers[q.id])?.label || mesactsAnswers[q.id]}</td></tr>))}</tbody></table>
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-slate-800 border-b-2 border-teal-600 pb-2 mb-4">TMMS-24 (Inteligencia Emocional)</h3>
+                                    <table className="w-full text-xs"><thead><tr className="text-left text-slate-400 border-b"><th className="pb-2 w-8">#</th><th className="pb-2">Pregunta</th><th className="pb-2 w-24 text-right">Respuesta</th></tr></thead><tbody className="divide-y divide-slate-100">{TMMS24_QUESTIONS.map(q => (<tr key={q.id}><td className="py-2 font-bold text-slate-400 align-top">{q.id}</td><td className="py-2 pr-2 align-top">{q.text}</td><td className="py-2 text-right font-medium text-teal-700 align-top whitespace-normal">{TMMS24_OPTIONS.find(o => o.value === tmmsAnswers[q.id])?.label || tmmsAnswers[q.id]}</td></tr>))}</tbody></table>
+                                </div>
+                             </div>
+                          </>
+                      )}
+
+                      {reportViewMode === 'CONSENT' && (
+                        <div className="p-8 md:p-12 font-serif text-slate-800 leading-relaxed text-justify">
+                            <h2 className="text-2xl font-bold text-center mb-8 uppercase tracking-wide border-b-2 border-slate-800 pb-4">CARTA DE CONSENTIMIENTO INFORMADO</h2>
+                            <p className="text-right mb-4">Lugar y Fecha: <span className="border-b border-black px-2">{userData.city}</span>, <span className="border-b border-black px-2">{userData.timestamp.split(',')[1] || userData.timestamp}</span></p>
+                            <p className="text-right mb-8">Asunto: <span className="border-b border-black px-1 font-bold">Autorización para la aplicación de pruebas académicas. Nivel: Secundaria</span></p>
+                            <div className="space-y-6 text-lg">
+                                <p>Por medio de la presente, yo <span className="font-bold border-b border-black px-1">{userData.guardianName}</span>, padre, madre o tutor legal del alumno(a) <span className="font-bold border-b border-black px-1">{userData.studentName}</span>, quien cursa el nivel de educación secundaria en la <span className="font-bold">Escuela Secundaria Técnica Número 7</span>, autorizo de manera voluntaria e informada su participación en la aplicación de dos pruebas correspondientes a la asignatura de Metodología de la Investigación.</p>
+                                <p>Las pruebas que se aplicarán son las siguientes:</p>
+                                <ul className="list-disc pl-12 space-y-2 font-bold text-slate-700"><li>Escala TMMS-24, instrumento que permite conocer la percepción, comprensión y manejo de las emociones.</li><li>Batería de Bienestar Educativo (MESACTS), la cual evalúa aspectos relacionados con el bienestar del estudiante dentro del entorno escolar.</li></ul>
+                                <p>Ambas pruebas tienen un <strong>propósito exclusivamente educativo y académico</strong>. Su aplicación se realizará dentro del horario escolar, bajo la supervisión del docente responsable, y <strong>no representan ningún riesgo físico, emocional ni psicológico</strong> para el alumno(a).</p>
+                                <p>Se garantiza que la información y los resultados obtenidos serán tratados con <strong>estricta confidencialidad</strong>, respetando la privacidad del estudiante, y serán utilizados únicamente para fines escolares y de evaluación del aprendizaje.</p>
+                                <p>Después de haber recibido la información correspondiente y comprender el objetivo de las pruebas, expreso mi conformidad y otorgo el consentimiento para que mi hijo(a) participe en las mismas.</p>
+                            </div>
+                            <div className="mt-16 pt-8 text-center flex flex-col items-center">
+                                 <div className="mb-2">Atentamente</div>
+                                 {userData.signature ? (<img src={userData.signature} className="h-24 md:h-32 mb-2" alt="Firma" />) : (<div className="h-24 w-64 flex items-center justify-center border border-dashed border-slate-300 text-slate-400">Sin firma digital</div>)}
+                                 <div className="border-t border-black w-64 pt-2 font-bold">{userData.guardianName}</div>
+                                 <div className="text-sm text-slate-500">Nombre y firma del padre o tutor</div>
+                            </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+            };
+
+            switch (currentScreen) {
+                case 'START': return renderStart();
+                case 'REGISTER': return renderRegister();
+                case 'CONSENT': return renderConsent();
+                case 'MESACTS': return renderMesacts();
+                case 'TMMS24': return renderTmms24();
+                case 'THANK_YOU': return renderThankYou();
+                case 'ADMIN_LOGIN': return renderAdminLogin();
+                case 'ADMIN_PANEL': return renderAdminPanel();
+                default: return renderStart();
+            }
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
 </html>
