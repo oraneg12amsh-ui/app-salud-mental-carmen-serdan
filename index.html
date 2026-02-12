@@ -53,7 +53,7 @@
           BookOpen, CheckCircle2, BrainCircuit, GraduationCap, User, 
           FileSignature, PenTool, Printer, Lock, X, Play, ArrowRight,
           ClipboardList, Eye, LogOut, Home, Eraser, Download, Cloud, ArrowLeft,
-          FileText, ListChecks
+          FileText, ListChecks, Save, Upload, Wifi, WifiOff
         } from 'lucide-react';
         import html2canvas from 'html2canvas';
         import { jsPDF } from 'jspdf';
@@ -61,7 +61,7 @@
         // --- FIREBASE CONFIGURATION ---
         import { initializeApp } from "firebase/app";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from "firebase/firestore";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, enableIndexedDbPersistence } from "firebase/firestore";
 
         // Global Variables
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'psicotest-default';
@@ -86,6 +86,12 @@
             const app = initializeApp(config);
             auth = getAuth(app);
             db = getFirestore(app);
+            
+            // Try to enable offline persistence
+            enableIndexedDbPersistence(db).catch((err) => {
+                console.warn('Persistence warning:', err.code);
+            });
+
             isFirebaseAvailable = true;
             console.log("Firebase initialized");
         } catch (e) {
@@ -276,6 +282,7 @@
             const canvasRef = useRef(null);
             const [isDrawing, setIsDrawing] = useState(false);
             const [hasSignature, setHasSignature] = useState(false);
+            const fileInputRef = useRef(null);
 
             useEffect(() => {
                 if (!isFirebaseAvailable) {
@@ -352,6 +359,7 @@
 
                 try {
                     if (isFirebaseAvailable && user) {
+                        // Using 'public' path so all shared links write to the same collection
                         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'submissions'), submissionData);
                     } else {
                         throw new Error("Local save fallback");
@@ -369,7 +377,6 @@
 
             const handleAdminLogin = (e) => {
                 e.preventDefault();
-                // Base64 check for "equipo6" -> 'ZXF1aXBvNg=='
                 try {
                     if (btoa(adminPasswordInput) === 'ZXF1aXBvNg==') {
                         setAdminPasswordInput('');
@@ -381,6 +388,40 @@
                 } catch (err) {
                     setLoginError(true);
                 }
+            };
+
+            // --- DATA PERSISTENCE HELPERS ---
+            const handleExportJson = () => {
+                const dataStr = JSON.stringify(submissions, null, 2);
+                const blob = new Blob([dataStr], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.download = `respaldo_psicotest_${new Date().toISOString().split('T')[0]}.json`;
+                link.href = url;
+                link.click();
+            };
+
+            const handleImportJson = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const importedData = JSON.parse(event.target.result);
+                        if (Array.isArray(importedData)) {
+                            setLocalSubmissions(prev => {
+                                const existingIds = new Set(prev.map(s => s.id));
+                                const newItems = importedData.filter(s => !existingIds.has(s.id));
+                                return [...newItems, ...prev];
+                            });
+                            alert("Datos importados correctamente. Se han añadido al modo local.");
+                        }
+                    } catch (err) {
+                        alert("Error al leer el archivo. Asegúrate de que es un JSON válido.");
+                    }
+                };
+                reader.readAsText(file);
+                e.target.value = null;
             };
 
             const handleDownloadPdf = async () => {
@@ -448,6 +489,15 @@
                 setUserData(prev => ({...prev, signature: ''}));
             };
 
+            const getSortedAnswersString = (answers) => {
+                return Object.entries(answers)
+                  .sort((a, b) => Number(a[0]) - Number(b[0]))
+                  .map(([, val]) => val)
+                  .join(', ');
+            };
+
+            // --- RENDER SCREENS ---
+
             const renderStart = () => (
                 <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 relative">
                     <button onClick={() => setCurrentScreen('ADMIN_LOGIN')} className="absolute top-6 right-6 p-3 text-slate-400 hover:text-indigo-600 bg-white rounded-full shadow-sm border"><Lock size={20} /></button>
@@ -456,6 +506,14 @@
                         <h1 className="text-4xl md:text-6xl font-black text-slate-900 tracking-tight mb-4">PsicoTest <span className="text-indigo-600">UGM</span></h1>
                         <p className="text-base md:text-lg text-slate-600 mb-10 max-w-lg mx-auto leading-relaxed px-4">Plataforma de evaluación de bienestar escolar e inteligencia emocional.<br/><span className="text-sm text-slate-400 block mt-2">Escuela Secundaria Técnica Número 7</span></p>
                         <button onClick={startNewSession} className="px-8 py-4 font-bold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 hover:scale-105 shadow-xl transition-all flex items-center mx-auto"><span>Comenzar Evaluación</span><ArrowRight className="ml-2 w-5 h-5" /></button>
+                    </div>
+                    {/* Connection Indicator */}
+                    <div className="absolute bottom-4 right-4 flex items-center gap-2 text-xs font-medium bg-white/80 px-3 py-1.5 rounded-full shadow-sm border">
+                        {isFirebaseAvailable && user ? (
+                            <><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> <span className="text-slate-600">Conectado</span></>
+                        ) : (
+                            <><span className="w-2 h-2 rounded-full bg-amber-500"></span> <span className="text-amber-700">Modo Local</span></>
+                        )}
                     </div>
                 </div>
             );
@@ -507,7 +565,7 @@
 
             const renderMesacts = () => (
                 <TestLayout title="1. Batería de Bienestar (MESACTS)" subtitle={`Estudiante: ${userData.studentName}`} onBack={() => {}} progress={(Object.keys(mesactsAnswers).length / MESACTS_QUESTIONS.length) * 100}>
-                    <div className="bg-indigo-600 rounded-xl p-4 md:p-6 text-white mb-6 md:mb-8 shadow-lg"><div className="flex items-start gap-4"><div className="bg-white/20 p-2 rounded-lg shrink-0"><GraduationCap size={24} /></div><div><h3 className="font-bold text-lg mb-1">Instrucciones</h3><p className="text-indigo-100 text-sm">Lee cada frase cuidadosamente. Selecciona la opción que mejor describa cómo te sientes. No hay respuestas incorrectas.</p></div></div></div>
+                    <div className="bg-indigo-600 rounded-xl p-4 md:p-6 text-white mb-6 md:mb-8 shadow-lg"><div className="flex items-start gap-4"><div className="bg-white/20 p-2 rounded-lg shrink-0"><GraduationCap size={24} /></div><div><h3 className="font-bold text-lg mb-1">Instrucciones</h3><p className="text-indigo-100 text-sm">Lee cada frase cuidadosamente. Selecciona la opción que mejor describa cómo te sientes con respecto a tu escuela. No hay respuestas incorrectas.</p></div></div></div>
                     <div className="space-y-6">{MESACTS_QUESTIONS.map((q) => (<div key={q.id} className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-100"><h3 className="text-base md:text-lg font-medium text-slate-800 mb-4 flex gap-3"><span className="text-slate-300 font-bold shrink-0">{q.id}.</span> {q.text}</h3><div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">{MESACTS_OPTIONS.map((opt) => (<button key={opt.value} onClick={() => setMesactsAnswers(prev => ({ ...prev, [q.id]: opt.value }))} className={`px-3 py-4 rounded-lg text-sm font-medium border transition-all ${mesactsAnswers[q.id] === opt.value ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white'}`}>{opt.label}</button>))}</div></div>))}</div>
                     <div className="mt-12 flex justify-end pb-12"><Button disabled={Object.keys(mesactsAnswers).length !== MESACTS_QUESTIONS.length} onClick={() => { window.scrollTo(0,0); setCurrentScreen('TMMS24'); }} className={Object.keys(mesactsAnswers).length !== MESACTS_QUESTIONS.length ? "opacity-50" : "shadow-xl"}>Siguiente Prueba <ArrowRight size={16} className="ml-2 inline" /></Button></div>
                 </TestLayout>
@@ -543,7 +601,17 @@
                 return (
                   <div className="min-h-screen bg-slate-100 p-4 md:p-8">
                     <div className="max-w-6xl mx-auto">
-                      <div className="flex justify-between items-center mb-8"><div><h1 className="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2">Panel de Control <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 font-medium ${isFirebaseAvailable ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}><Cloud size={12}/> {isFirebaseAvailable ? 'En línea' : 'Modo Local'}</span></h1></div><Button onClick={() => setCurrentScreen('START')} variant="outline" className="flex items-center gap-2"><LogOut size={16} /> Salir</Button></div>
+                      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+                        <div>
+                          <h1 className="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2">Panel de Control <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 font-medium ${isFirebaseAvailable ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}><Cloud size={12}/> {isFirebaseAvailable ? 'En línea' : 'Modo Local'}</span></h1>
+                        </div>
+                        <div className="flex gap-2">
+                            <input type="file" accept=".json" onChange={handleImportJson} className="hidden" ref={fileInputRef} />
+                            <button onClick={() => fileInputRef.current.click()} className="px-4 py-2 bg-white text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 flex items-center gap-2 text-sm font-medium"><Upload size={16} /> Importar Datos</button>
+                            <button onClick={handleExportJson} className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-black flex items-center gap-2 text-sm font-medium shadow-sm"><Save size={16} /> Respaldar Datos (JSON)</button>
+                            <Button onClick={() => setCurrentScreen('START')} variant="outline" className="flex items-center gap-2"><LogOut size={16} /> Salir</Button>
+                        </div>
+                      </div>
                       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                         {submissions.length === 0 ? (
                            <div className="p-12 text-center text-slate-400 flex flex-col items-center"><ClipboardList size={48} className="mb-4 opacity-50" /><p>No hay evaluaciones registradas aún.</p></div>
