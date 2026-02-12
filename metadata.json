@@ -1,0 +1,5 @@
+{
+  "name": "PsicoTest Pro: MESACTS & TMMS-24",
+  "description": "Una plataforma profesional para la aplicación y calificación automática de la Escala de Bienestar Escolar (MESACTS) y la Escala de Metaconocimiento Emocional (TMMS-24).",
+  "requestFramePermissions": []
+}
